@@ -59,6 +59,7 @@ dev = [
     "types-tensorflow>=2.18.0.20250319",
     "types-tqdm>=4.67.0.20250319",
     "types-ujson>=5.10.0.20240515",
+    "bumpver>=2024.1130",
 ]
 
 [project.optional-dependencies]
@@ -126,3 +127,12 @@ ignore = [
 
 [tool.ruff.lint.isort]
 extra-standard-library = ["typing_extensions"]
+
+
+[bumpver]
+current_version = "1.9.6"
+version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
+
+[bumpver.file_patterns]
+"pyproject.toml" = ['current_version = "{version}"', 'version = "{version}"']
+"pdf2zh/__init__.py" = ['__version__ = "{version}"']

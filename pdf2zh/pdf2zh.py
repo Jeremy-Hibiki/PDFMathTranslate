@@ -88,8 +88,8 @@ def create_parser() -> argparse.ArgumentParser:
     parse_params.add_argument(
         "--service",
         "-s",
-        type=str,
-        default="google",
+        nargs="+",
+        default=["google"],
         help="The service to use for translation.",
     )
     parse_params.add_argument(

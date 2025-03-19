@@ -7,6 +7,7 @@ import unicodedata
 from copy import copy
 from string import Template
 from typing import cast
+
 import deepl
 import ollama
 import openai
@@ -14,6 +15,7 @@ import requests
 import xinference_client
 from azure.ai.translation.text import TextTranslationClient
 from azure.core.credentials import AzureKeyCredential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from tencentcloud.common import credential
 from tencentcloud.tmt.v20180321.models import (
     TextTranslateRequest,
@@ -23,12 +25,6 @@ from tencentcloud.tmt.v20180321.tmt_client import TmtClient
 
 from pdf2zh.cache import TranslationCache
 from pdf2zh.config import ConfigManager
-
-
-from tenacity import retry, retry_if_exception_type
-from tenacity import stop_after_attempt
-from tenacity import wait_exponential
-
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +114,7 @@ class BaseTranslator:
         """
         raise NotImplementedError
 
-    def prompt(
-        self, text: str, prompt_template: Template | None = None
-    ) -> list[dict[str, str]]:
+    def prompt(self, text: str, prompt_template: Template | None = None) -> list[dict[str, str]]:
         try:
             return [
                 {
@@ -167,9 +161,7 @@ class BaseTranslator:
         return f"</b{id}>"
 
     def get_formular_placeholder(self, id: int):
-        return self.get_rich_text_left_placeholder(
-            id
-        ) + self.get_rich_text_right_placeholder(id)
+        return self.get_rich_text_left_placeholder(id) + self.get_rich_text_right_placeholder(id)
 
 
 class GoogleTranslator(BaseTranslator):
@@ -191,9 +183,7 @@ class GoogleTranslator(BaseTranslator):
             params={"tl": self.lang_out, "sl": self.lang_in, "q": text},
             headers=self.headers,
         )
-        re_result = re.findall(
-            r'(?s)class="(?:t0|result-container)">(.*?)<', response.text
-        )
+        re_result = re.findall(r'(?s)class="(?:t0|result-container)">(.*?)<', response.text)
         if response.status_code == 400:
             result = "IRREPARABLE TRANSLATION ERROR"
         else:
@@ -221,9 +211,7 @@ class BingTranslator(BaseTranslator):
         url = response.url[:-10]
         ig = re.findall(r"\"ig\":\"(.*?)\"", response.text)[0]
         iid = re.findall(r"data-iid=\"(.*?)\"", response.text)[-1]
-        key, token = re.findall(
-            r"params_AbusePreventionHelper\s=\s\[(.*?),\"(.*?)\",", response.text
-        )[0]
+        key, token = re.findall(r"params_AbusePreventionHelper\s=\s\[(.*?),\"(.*?)\",", response.text)[0]
         return url, ig, iid, key, token
 
     def do_translate(self, text):
@@ -252,18 +240,14 @@ class DeepLTranslator(BaseTranslator):
     }
     lang_map = {"zh": "zh-Hans"}
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         auth_key = self.envs["DEEPL_AUTH_KEY"]
         self.client = deepl.Translator(auth_key)
 
     def do_translate(self, text):
-        response = self.client.translate_text(
-            text, target_lang=self.lang_out, source_lang=self.lang_in
-        )
+        response = self.client.translate_text(text, target_lang=self.lang_out, source_lang=self.lang_in)
         return response.text
 
 
@@ -276,9 +260,7 @@ class DeepLXTranslator(BaseTranslator):
     }
     lang_map = {"zh": "zh-Hans"}
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         self.endpoint = self.envs["DEEPLX_ENDPOINT"]
@@ -361,9 +343,7 @@ class XinferenceTranslator(BaseTranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         if not model:
             model = self.envs["XINFERENCE_MODEL"]
@@ -382,9 +362,7 @@ class XinferenceTranslator(BaseTranslator):
                 xf_prompt = [
                     {
                         "role": "user",
-                        "content": xf_prompt[0]["content"]
-                        + "\n"
-                        + xf_prompt[1]["content"],
+                        "content": xf_prompt[0]["content"] + "\n" + xf_prompt[1]["content"],
                     }
                 ]
                 response = xf_model.chat(
@@ -392,9 +370,7 @@ class XinferenceTranslator(BaseTranslator):
                     messages=xf_prompt,
                 )
 
-                response = response["choices"][0]["message"]["content"].replace(
-                    "<end_of_turn>", ""
-                )
+                response = response["choices"][0]["message"]["content"].replace("<end_of_turn>", "")
                 if len(response) > maxlen:
                     raise Exception("Response too long")
                 return response.strip()
@@ -563,9 +539,7 @@ class ZhipuTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://open.bigmodel.cn/api/paas/v4"
         api_key = self.envs["ZHIPU_API_KEY"]
@@ -590,10 +564,7 @@ class ZhipuTranslator(OpenAITranslator):
                 messages=self.prompt(text, self.prompttext),
             )
         except openai.BadRequestError as e:
-            if (
-                json.loads(response.choices[0].message.content.strip())["error"]["code"]
-                == "1301"
-            ):
+            if json.loads(response.choices[0].message.content.strip())["error"]["code"] == "1301":
                 return "IRREPARABLE TRANSLATION ERROR"
             raise e
         return response.choices[0].message.content.strip()
@@ -608,9 +579,7 @@ class SiliconTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://api.siliconflow.cn/v1"
         api_key = self.envs["SILICON_API_KEY"]
@@ -637,9 +606,7 @@ class GeminiTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
         api_key = self.envs["GEMINI_API_KEY"]
@@ -666,17 +633,13 @@ class AzureTranslator(BaseTranslator):
     }
     lang_map = {"zh": "zh-Hans"}
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         endpoint = self.envs["AZURE_ENDPOINT"]
         api_key = self.envs["AZURE_API_KEY"]
         credential = AzureKeyCredential(api_key)
-        self.client = TextTranslationClient(
-            endpoint=endpoint, credential=credential, region="chinaeast2"
-        )
+        self.client = TextTranslationClient(endpoint=endpoint, credential=credential, region="chinaeast2")
         # https://github.com/Azure/azure-sdk-for-python/issues/9422
         logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
         logger.setLevel(logging.WARNING)
@@ -699,14 +662,12 @@ class TencentTranslator(BaseTranslator):
         "TENCENTCLOUD_SECRET_KEY": None,
     }
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model)
         try:
             cred = credential.DefaultCredentialProvider().get_credential()
-        except EnvironmentError:
+        except OSError:
             cred = credential.Credential(
                 self.envs["TENCENTCLOUD_SECRET_ID"],
                 self.envs["TENCENTCLOUD_SECRET_KEY"],
@@ -731,9 +692,7 @@ class AnythingLLMTranslator(BaseTranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_out, lang_in, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_out, lang_in, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         super().__init__(lang_out, lang_in, model, ignore_cache)
         self.api_url = self.envs["AnythingLLM_URL"]
@@ -753,9 +712,7 @@ class AnythingLLMTranslator(BaseTranslator):
             "sessionId": "translation_expert",
         }
 
-        response = requests.post(
-            self.api_url, headers=self.headers, data=json.dumps(payload)
-        )
+        response = requests.post(self.api_url, headers=self.headers, data=json.dumps(payload))
         response.raise_for_status()
         data = response.json()
 
@@ -770,9 +727,7 @@ class DifyTranslator(BaseTranslator):
         "DIFY_API_KEY": None,  # 替换为实际 API 密钥
     }
 
-    def __init__(
-        self, lang_out, lang_in, model, envs=None, ignore_cache=False, **kwargs
-    ):
+    def __init__(self, lang_out, lang_in, model, envs=None, ignore_cache=False, **kwargs):
         self.set_envs(envs)
         super().__init__(lang_out, lang_in, model, ignore_cache)
         self.api_url = self.envs["DIFY_API_URL"]
@@ -795,9 +750,7 @@ class DifyTranslator(BaseTranslator):
         }
 
         # 向 Dify 服务器发送请求
-        response = requests.post(
-            self.api_url, headers=headers, data=json.dumps(payload)
-        )
+        response = requests.post(self.api_url, headers=headers, data=json.dumps(payload))
         response.raise_for_status()
         response_data = response.json()
 
@@ -819,27 +772,20 @@ class ArgosTranslator(BaseTranslator):
         try:
             available_package = list(
                 filter(
-                    lambda x: x.from_code == self.lang_in
-                    and x.to_code == self.lang_out,
+                    lambda x: x.from_code == self.lang_in and x.to_code == self.lang_out,
                     available_packages,
                 )
             )[0]
         except Exception:
-            raise ValueError(
-                "lang_in and lang_out pair not supported by Argos Translate."
-            )
+            raise ValueError("lang_in and lang_out pair not supported by Argos Translate.")
         download_path = available_package.download()
         argostranslate.package.install_from_path(download_path)
 
     def translate(self, text: str, ignore_cache: bool = False):
         # Translate
         installed_languages = argostranslate.translate.get_installed_languages()
-        from_lang = list(filter(lambda x: x.code == self.lang_in, installed_languages))[
-            0
-        ]
-        to_lang = list(filter(lambda x: x.code == self.lang_out, installed_languages))[
-            0
-        ]
+        from_lang = list(filter(lambda x: x.code == self.lang_in, installed_languages))[0]
+        to_lang = list(filter(lambda x: x.code == self.lang_out, installed_languages))[0]
         translation = from_lang.get_translation(to_lang)
         translatedText = translation.translate(text)
         return translatedText
@@ -854,9 +800,7 @@ class GrokTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://api.x.ai/v1"
         api_key = self.envs["GORK_API_KEY"]
@@ -881,9 +825,7 @@ class GroqTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://api.groq.com/openai/v1"
         api_key = self.envs["GROQ_API_KEY"]
@@ -908,9 +850,7 @@ class DeepseekTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://api.deepseek.com/v1"
         api_key = self.envs["DEEPSEEK_API_KEY"]
@@ -936,9 +876,7 @@ class OpenAIlikedTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         if self.envs["OPENAILIKED_BASE_URL"]:
             base_url = self.envs["OPENAILIKED_BASE_URL"]
@@ -979,9 +917,7 @@ class QwenMtTranslator(OpenAITranslator):
     }
     CustomPrompt = True
 
-    def __init__(
-        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
-    ):
+    def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
         self.set_envs(envs)
         base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         api_key = self.envs["ALI_API_KEY"]
@@ -1038,3 +974,29 @@ class QwenMtTranslator(OpenAITranslator):
             extra_body={"translation_options": translation_options},
         )
         return response.choices[0].message.content.strip()
+
+
+ALL_TRANSLATORS: list[type[BaseTranslator]] = [
+    GoogleTranslator,
+    BingTranslator,
+    DeepLTranslator,
+    DeepLXTranslator,
+    OllamaTranslator,
+    XinferenceTranslator,
+    AzureOpenAITranslator,
+    OpenAITranslator,
+    ZhipuTranslator,
+    ModelScopeTranslator,
+    SiliconTranslator,
+    GeminiTranslator,
+    AzureTranslator,
+    TencentTranslator,
+    DifyTranslator,
+    AnythingLLMTranslator,
+    ArgosTranslator,
+    GrokTranslator,
+    GroqTranslator,
+    DeepseekTranslator,
+    OpenAIlikedTranslator,
+    QwenMtTranslator,
+]

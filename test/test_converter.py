@@ -54,9 +54,9 @@ class TestTranslateConverter(unittest.TestCase):
         )
 
     def test_translator_initialization(self):
-        self.assertIsNotNone(self.converter.translator)
-        self.assertEqual(self.converter.translator.lang_in, "en")
-        self.assertEqual(self.converter.translator.lang_out, "zh-CN")
+        self.assertIsNotNone(self.converter.translators[0])
+        self.assertEqual(self.converter.translators[0].lang_in, "en")
+        self.assertEqual(self.converter.translators[0].lang_out, "zh-CN")
 
     @patch("pdf2zh.converter.TranslateConverter.receive_layout")
     def test_receive_layout(self, mock_receive_layout):

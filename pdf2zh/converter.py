@@ -4,7 +4,6 @@ import re
 import unicodedata
 from enum import Enum
 from string import Template
-from typing import Dict
 
 import numpy as np
 from pdfminer.converter import PDFConverter
@@ -16,29 +15,8 @@ from pymupdf import Font
 from tenacity import retry, wait_fixed
 
 from pdf2zh.translator import (
-    AnythingLLMTranslator,
-    ArgosTranslator,
-    AzureOpenAITranslator,
-    AzureTranslator,
+    ALL_TRANSLATORS,
     BaseTranslator,
-    BingTranslator,
-    DeepLTranslator,
-    DeepLXTranslator,
-    DeepseekTranslator,
-    DifyTranslator,
-    GeminiTranslator,
-    GoogleTranslator,
-    GrokTranslator,
-    GroqTranslator,
-    ModelScopeTranslator,
-    OllamaTranslator,
-    OpenAIlikedTranslator,
-    OpenAITranslator,
-    QwenMtTranslator,
-    SiliconTranslator,
-    TencentTranslator,
-    XinferenceTranslator,
-    ZhipuTranslator,
 )
 
 log = logging.getLogger(__name__)
@@ -137,10 +115,10 @@ class TranslateConverter(PDFConverterEx):
         layout={},
         lang_in: str = "",
         lang_out: str = "",
-        service: str = "",
+        service: list[str] | str = "",
         noto_name: str = "",
         noto: Font = None,
-        envs: Dict = None,
+        envs: dict = None,
         prompt: Template = None,
         ignore_cache: bool = False,
     ) -> None:
@@ -151,19 +129,26 @@ class TranslateConverter(PDFConverterEx):
         self.layout = layout
         self.noto_name = noto_name
         self.noto = noto
-        self.translator: BaseTranslator = None
+        self.translators: list[BaseTranslator] = []
         # e.g. "ollama:gemma2:9b" -> ["ollama", "gemma2:9b"]
-        param = service.split(":", 1)
-        service_name = param[0]
-        service_model = param[1] if len(param) > 1 else None
-        if not envs:
-            envs = {}
-        for translator in [GoogleTranslator, BingTranslator, DeepLTranslator, DeepLXTranslator, OllamaTranslator, XinferenceTranslator, AzureOpenAITranslator,
-                           OpenAITranslator, ZhipuTranslator, ModelScopeTranslator, SiliconTranslator, GeminiTranslator, AzureTranslator, TencentTranslator, DifyTranslator, AnythingLLMTranslator, ArgosTranslator, GrokTranslator, GroqTranslator, DeepseekTranslator, OpenAIlikedTranslator, QwenMtTranslator,]:
-            if service_name == translator.name:
-                self.translator = translator(lang_in, lang_out, service_model, envs=envs, prompt=prompt, ignore_cache=ignore_cache)
-        if not self.translator:
-            raise ValueError("Unsupported translation service")
+        service = [service] if isinstance(service, str) else service
+        for service_name in service:
+            param = service_name.split(":", 1)
+            service_name = param[0]
+            service_model = param[1] if len(param) > 1 else None
+            if not envs:
+                envs = {}
+            translator = None
+            for Translator in ALL_TRANSLATORS:
+                if service_name == Translator.name:
+                    translator = Translator(lang_in, lang_out, service_model, envs=envs, prompt=prompt, ignore_cache=ignore_cache)
+                    break
+            if not translator:
+                log.warning(f"Unsupported translation service: {service_name}, skipped to the next ...")
+            else:
+                self.translators.append(translator)
+        if not self.translators:
+            raise ValueError("No supported translation service")
 
     def receive_layout(self, ltpage: LTPage):
         # 段落
@@ -347,15 +332,18 @@ class TranslateConverter(PDFConverterEx):
         def worker(s: str):  # 多线程翻译
             if not s.strip() or re.match(r"^\{v\d+\}$", s):  # 空白和公式不翻译
                 return s
-            try:
-                new = self.translator.translate(s)
-                return new
-            except BaseException as e:
-                if log.isEnabledFor(logging.DEBUG):
-                    log.exception(e)
-                else:
-                    log.exception(e, exc_info=False)
-                raise e
+            for translator in self.translators:
+                try:
+                    new = translator.translate(s)
+                    return new
+                except BaseException as e:
+                    if log.isEnabledFor(logging.DEBUG):
+                        log.exception(e)
+                    else:
+                        log.exception(e, exc_info=False)
+                    log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
+                    continue
+            raise ValueError("All translation services failed")
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.thread
         ) as executor:
@@ -376,7 +364,7 @@ class TranslateConverter(PDFConverterEx):
             "zh-cn": 1.4, "zh-tw": 1.4, "zh-hans": 1.4, "zh-hant": 1.4, "zh": 1.4,
             "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8
         }
-        default_line_height = LANG_LINEHEIGHT_MAP.get(self.translator.lang_out.lower(), 1.1) # 小语种默认1.1
+        default_line_height = LANG_LINEHEIGHT_MAP.get(self.translators[0].lang_out.lower(), 1.1) # 小语种默认1.1
         _x, _y = 0, 0
         ops_list = []
 

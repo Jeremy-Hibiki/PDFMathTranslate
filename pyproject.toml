@@ -13,7 +13,7 @@ classifiers = [
 dependencies = [
     "requests",
     # for arm64 linux whells
-    "pymupdf<1.25.3",
+    "pymupdf>=1.24,<1.25.3",
     "tqdm",
     "tenacity",
     "numpy",
@@ -34,28 +34,36 @@ dependencies = [
     "peewee>=3.17.8",
     "fontTools",
     "babeldoc>=0.1.22, <0.3.0",
-    "rich"
-]
-
-[project.optional-dependencies]
-backend = [
-    "flask",
-    "celery",
-    "redis"
-]
-argostranslate = [
-    "argostranslate"
+    "rich",
 ]
 
 [dependency-groups]
 dev = [
-    "black",
-    "flake8",
+    "ruff==0.11.0",
     "pre-commit",
     "pytest",
     "build",
-    "bumpver>=2024.1130",
+    "lxml-stubs>=0.5.1",
+    "pandas-stubs>=2.2.3.250308",
+    "types-pyyaml>=6.0.12.20241230",
+    "types-pygments>=2.19.0.20250305",
+    "types-aiofiles>=24.1.0.20241221",
+    "types-colorama>=0.4.15.20240311",
+    "types-defusedxml>=0.7.0.20240218",
+    "types-peewee>=3.17.9.20250308",
+    "types-protobuf>=5.29.1.20250315",
+    "types-pycurl>=7.45.6.20250309",
+    "types-pytz>=2025.1.0.20250318",
+    "types-requests>=2.32.0.20250306",
+    "types-simplejson>=3.20.0.20250318",
+    "types-tensorflow>=2.18.0.20250319",
+    "types-tqdm>=4.67.0.20250319",
+    "types-ujson>=5.10.0.20240515",
 ]
+
+[project.optional-dependencies]
+backend = ["flask", "celery", "redis"]
+argostranslate = ["argostranslate"]
 
 [project.urls]
 Homepage = "https://github.com/Byaidu/PDFMathTranslate"
@@ -71,17 +79,50 @@ pdf2zh = "pdf2zh.pdf2zh:main"
 ignore = ["E203", "E261", "E501", "W503", "E741"]
 max-line-length = 88
 
+[tool.uv]
+managed = true
+package = true
+no-sources = false
+override-dependencies = ["pymupdf>=1.24"]
 
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py310"
 
-[bumpver]
-current_version = "1.9.6"
-version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
-
-[bumpver.file_patterns]
-"pyproject.toml" = [
-    'current_version = "{version}"',
-    'version = "{version}"'
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # flake8-bugbear
+    "B",
+    "W",
+    # flake8-future-annotations
+    "FA",
+    # isort
+    "I",
+    # pyupgrade
+    "UP",
 ]
-"pdf2zh/__init__.py" = [
-    '__version__ = "{version}"'
+ignore = [
+    "B006",
+    "E203",
+    "E261",
+    "E501",
+    "E741",
+    "D100",
+    "D203",
+    "D213",
+    "D300",
+    "E111",
+    "E114",
+    "E117",
+    "ISC001",
+    "ISC002",
+    "W191",
 ]
+
+[tool.ruff.lint.isort]
+extra-standard-library = ["typing_extensions"]

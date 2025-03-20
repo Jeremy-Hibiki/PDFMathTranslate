@@ -332,7 +332,9 @@ class TranslateConverter(PDFConverterEx):
         def worker(s: str):  # 多线程翻译
             if not s.strip() or re.match(r"^\{v\d+\}$", s):  # 空白和公式不翻译
                 return s
-            for translator in self.translators:
+            it = iter(self.translators)
+            translator = next(it, None)
+            while translator:
                 try:
                     new = translator.translate(s)
                     return new
@@ -341,9 +343,10 @@ class TranslateConverter(PDFConverterEx):
                         log.exception(e)
                     else:
                         log.exception(e, exc_info=False)
-                    log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
-                    continue
-            raise ValueError("All translation services failed")
+                    translator = next(it, None)
+                    if translator:
+                        log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
+            raise ValueError("All translation services failed") from None
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.thread
         ) as executor:

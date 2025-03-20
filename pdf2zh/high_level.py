@@ -10,7 +10,7 @@ import tempfile
 from asyncio import CancelledError
 from pathlib import Path
 from string import Template
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 import numpy as np
 import requests
@@ -80,6 +80,8 @@ def translate_patch(
     envs: dict = None,
     prompt: Template = None,
     ignore_cache: bool = False,
+    max_retries: int = 10,
+    error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
 ) -> None:
     rsrcmgr = PDFResourceManager()
@@ -98,6 +100,8 @@ def translate_patch(
         envs,
         prompt,
         ignore_cache,
+        max_retries=max_retries,
+        error=error,
     )
 
     assert device is not None
@@ -175,6 +179,8 @@ def translate_stream(
     prompt: Template = None,
     skip_subset_fonts: bool = False,
     ignore_cache: bool = False,
+    max_retries: int = 10,
+    error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
 ):
     font_list = [("tiro", None)]
@@ -310,6 +316,8 @@ def translate(
     prompt: Template = None,
     skip_subset_fonts: bool = False,
     ignore_cache: bool = False,
+    max_retries: int = 10,
+    error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
 ):
     if not files:

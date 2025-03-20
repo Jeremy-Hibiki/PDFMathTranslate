@@ -4,6 +4,7 @@ import re
 import unicodedata
 from enum import Enum
 from string import Template
+from typing import Literal
 
 import numpy as np
 from pdfminer.converter import PDFConverter
@@ -12,7 +13,7 @@ from pdfminer.pdffont import PDFCIDFont, PDFUnicodeNotDefined
 from pdfminer.pdfinterp import PDFGraphicState, PDFResourceManager
 from pdfminer.utils import apply_matrix_pt, mult_matrix
 from pymupdf import Font
-from tenacity import retry, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from pdf2zh.translator import BaseTranslator, TranslatorRegistry
 
@@ -118,6 +119,8 @@ class TranslateConverter(PDFConverterEx):
         envs: dict = None,
         prompt: Template = None,
         ignore_cache: bool = False,
+        max_retries: int = 10,
+        error: Literal["raise", "source", "drop"] = "source",
     ) -> None:
         super().__init__(rsrcmgr)
         self.vfont = vfont
@@ -127,6 +130,8 @@ class TranslateConverter(PDFConverterEx):
         self.noto_name = noto_name
         self.noto = noto
         self.translators: list[BaseTranslator] = []
+        self.max_retries = max_retries
+        self.error = error
         # e.g. "ollama:gemma2:9b" -> ["ollama", "gemma2:9b"]
         service = [service] if isinstance(service, str) else service
         for service_name in service:
@@ -325,25 +330,45 @@ class TranslateConverter(PDFConverterEx):
         # B. 段落翻译
         log.debug("\n==========[SSTACK]==========\n")
 
-        @retry(wait=wait_fixed(1))
         def worker(s: str):  # 多线程翻译
-            if not s.strip() or re.match(r"^\{v\d+\}$", s):  # 空白和公式不翻译
-                return s
-            it = iter(self.translators)
-            translator = next(it, None)
-            while translator:
-                try:
-                    new = translator.translate(s)
-                    return new
-                except BaseException as e:
-                    if log.isEnabledFor(logging.DEBUG):
-                        log.exception(e)
-                    else:
-                        log.exception(e, exc_info=False)
-                    translator = next(it, None)
-                    if translator:
-                        log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
-            raise ValueError("All translation services failed") from None
+            @retry(
+                wait=wait_fixed(1),
+                stop=stop_after_attempt(self.max_retries),
+                reraise=True,
+            )
+            def runner():
+                if not s.strip() or re.match(r"^\{v\d+\}$", s):  # 空白和公式不翻译
+                    return s
+                it = iter(self.translators)
+                translator = next(it, None)
+                while translator:
+                    try:
+                        new = translator.translate(s)
+                        return new
+                    except BaseException as e:
+                        if log.isEnabledFor(logging.DEBUG):
+                            log.exception(e)
+                        else:
+                            log.exception(e, exc_info=False)
+                        translator = next(it, None)
+                        if translator:
+                            log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
+                raise ValueError("All translation services failed") from None
+
+            try:
+                return runner()
+            except Exception as e:
+                if self.error == "raise":
+                    raise e
+                elif self.error == "source":
+                    log.info("Translation failed, fill with source text")
+                    return s
+                elif self.error == "drop":
+                    log.info("Translation failed, left the area blank.")
+                    return ""
+                else:
+                    raise ValueError(f"Unknown error strategy: {self.error}") from e
+
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.thread
         ) as executor:

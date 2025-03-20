@@ -14,10 +14,7 @@ from pdfminer.utils import apply_matrix_pt, mult_matrix
 from pymupdf import Font
 from tenacity import retry, wait_fixed
 
-from pdf2zh.translator import (
-    ALL_TRANSLATORS,
-    BaseTranslator,
-)
+from pdf2zh.translator import BaseTranslator, TranslatorRegistry
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +136,7 @@ class TranslateConverter(PDFConverterEx):
             if not envs:
                 envs = {}
             translator = None
-            for Translator in ALL_TRANSLATORS:
+            for Translator in TranslatorRegistry.all_translators():
                 if service_name == Translator.name:
                     translator = Translator(lang_in, lang_out, service_model, envs=envs, prompt=prompt, ignore_cache=ignore_cache)
                     break

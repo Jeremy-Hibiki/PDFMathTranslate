@@ -2,19 +2,20 @@
 
 import asyncio
 import io
+import logging
 import os
 import re
 import sys
 import tempfile
-import logging
 from asyncio import CancelledError
 from pathlib import Path
 from string import Template
-from typing import Any, BinaryIO, List, Optional, Dict
+from typing import Any, BinaryIO
 
 import numpy as np
 import requests
 import tqdm
+from babeldoc.assets.assets import get_font_and_metadata
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfexceptions import PDFValueError
 from pdfminer.pdfinterp import PDFResourceManager
@@ -22,12 +23,10 @@ from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
 
+from pdf2zh.config import ConfigManager
 from pdf2zh.converter import TranslateConverter
 from pdf2zh.doclayout import OnnxModel
 from pdf2zh.pdfinterp import PDFPageInterpreterEx
-
-from pdf2zh.config import ConfigManager
-from babeldoc.assets.assets import get_font_and_metadata
 
 NOTO_NAME = "noto"
 
@@ -56,20 +55,16 @@ noto_list = [
 ]
 
 
-def check_files(files: List[str]) -> List[str]:
-    files = [
-        f for f in files if not f.startswith("http://")
-    ]  # exclude online files, http
-    files = [
-        f for f in files if not f.startswith("https://")
-    ]  # exclude online files, https
+def check_files(files: list[str]) -> list[str]:
+    files = [f for f in files if not f.startswith("http://")]  # exclude online files, http
+    files = [f for f in files if not f.startswith("https://")]  # exclude online files, https
     missing_files = [file for file in files if not os.path.exists(file)]
     return missing_files
 
 
 def translate_patch(
     inf: BinaryIO,
-    pages: Optional[list[int]] = None,
+    pages: list[int] | None = None,
     vfont: str = "",
     vchar: str = "",
     thread: int = 0,
@@ -82,7 +77,7 @@ def translate_patch(
     callback: object = None,
     cancellation_event: asyncio.Event = None,
     model: OnnxModel = None,
-    envs: Dict = None,
+    envs: dict = None,
     prompt: Template = None,
     ignore_cache: bool = False,
     **kwarg: Any,
@@ -126,9 +121,7 @@ def translate_patch(
                 callback(progress)
             page.pageno = pageno
             pix = doc_zh[page.pageno].get_pixmap()
-            image = np.fromstring(pix.samples, np.uint8).reshape(
-                pix.height, pix.width, 3
-            )[:, :, ::-1]
+            image = np.fromstring(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
             page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
@@ -168,7 +161,7 @@ def translate_patch(
 
 def translate_stream(
     stream: bytes,
-    pages: Optional[list[int]] = None,
+    pages: list[int] | None = None,
     lang_in: str = "",
     lang_out: str = "",
     service: str = "",
@@ -178,7 +171,7 @@ def translate_stream(
     callback: object = None,
     cancellation_event: asyncio.Event = None,
     model: OnnxModel = None,
-    envs: Dict = None,
+    envs: dict = None,
     prompt: Template = None,
     skip_subset_fonts: bool = False,
     ignore_cache: bool = False,
@@ -302,7 +295,7 @@ def convert_to_pdfa(input_path, output_path):
 def translate(
     files: list[str],
     output: str = "",
-    pages: Optional[list[int]] = None,
+    pages: list[int] | None = None,
     lang_in: str = "",
     lang_out: str = "",
     service: str = "",
@@ -313,7 +306,7 @@ def translate(
     compatible: bool = False,
     cancellation_event: asyncio.Event = None,
     model: OnnxModel = None,
-    envs: Dict = None,
+    envs: dict = None,
     prompt: Template = None,
     skip_subset_fonts: bool = False,
     ignore_cache: bool = False,
@@ -333,16 +326,12 @@ def translate(
     result_files = []
 
     for file in files:
-        if type(file) is str and (
-            file.startswith("http://") or file.startswith("https://")
-        ):
+        if type(file) is str and (file.startswith("http://") or file.startswith("https://")):
             print("Online files detected, downloading...")
             try:
                 r = requests.get(file, allow_redirects=True)
                 if r.status_code == 200:
-                    with tempfile.NamedTemporaryFile(
-                        suffix=".pdf", delete=False
-                    ) as tmp_file:
+                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
                         print(f"Writing the file: {file}...")
                         tmp_file.write(r.content)
                         file = tmp_file.name
@@ -357,9 +346,7 @@ def translate(
         # If the commandline has specified converting to PDF/A format
         # --compatible / -cp
         if compatible:
-            with tempfile.NamedTemporaryFile(
-                suffix="-pdfa.pdf", delete=False
-            ) as tmp_pdfa:
+            with tempfile.NamedTemporaryFile(suffix="-pdfa.pdf", delete=False) as tmp_pdfa:
                 print(f"Converting {file} to PDF/A format...")
                 convert_to_pdfa(file, tmp_pdfa.name)
                 doc_raw = open(tmp_pdfa.name, "rb")
@@ -372,12 +359,10 @@ def translate(
         temp_dir = Path(tempfile.gettempdir())
         file_path = Path(file)
         try:
-            if file_path.exists() and file_path.resolve().is_relative_to(
-                temp_dir.resolve()
-            ):
+            if file_path.exists() and file_path.resolve().is_relative_to(temp_dir.resolve()):
                 file_path.unlink(missing_ok=True)
                 logger.debug(f"Cleaned temp file: {file_path}")
-        except Exception as e:
+        except Exception:
             logger.warning(f"Failed to clean temp file {file_path}", exc_info=True)
 
         s_mono, s_dual = translate_stream(

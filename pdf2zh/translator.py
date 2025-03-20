@@ -1,3 +1,4 @@
+import ast
 import html
 import json
 import logging
@@ -386,6 +387,7 @@ class OpenAITranslator(BaseTranslator):
         "OPENAI_BASE_URL": "https://api.openai.com/v1",
         "OPENAI_API_KEY": None,
         "OPENAI_MODEL": "gpt-4o-mini",
+        "OPENAI_EXTRA_KWARGS": "",
     }
     CustomPrompt = True
 
@@ -399,12 +401,31 @@ class OpenAITranslator(BaseTranslator):
         envs=None,
         prompt=None,
         ignore_cache=False,
+        extra_kwargs: dict | None = None,
     ):
         self.set_envs(envs)
         if not model:
             model = self.envs["OPENAI_MODEL"]
         super().__init__(lang_in, lang_out, model, ignore_cache)
-        self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
+        env_kwargs = extra_kwargs or self.envs.get("OPENAI_EXTRA_KWARGS", "")
+        if env_kwargs:
+            try:
+                try:
+                    client_kwargs = json.loads(env_kwargs)
+                except json.JSONDecodeError:
+                    client_kwargs = ast.literal_eval(env_kwargs)
+            except Exception:
+                logger.warning(
+                    "Ignoring illegal OPENAI(LIKED)_EXTRA_KWARGS, must be a valid JSON string or Python expression"
+                )
+                client_kwargs = dict()
+            for k in ["model", "messages"]:
+                if k in client_kwargs:
+                    del client_kwargs[k]
+        else:
+            client_kwargs = dict()
+        client_kwargs.update({"temperature": 0})  # 随机采样可能会打断公式标记
+        self.options = client_kwargs
         self.client = openai.OpenAI(
             base_url=base_url or self.envs["OPENAI_BASE_URL"],
             api_key=api_key or self.envs["OPENAI_API_KEY"],
@@ -429,6 +450,7 @@ class OpenAITranslator(BaseTranslator):
         response = self.client.chat.completions.create(
             model=self.model,
             **self.options,
+            max_tokens=len(text) * 5,
             messages=self.prompt(text, self.prompttext),
         )
         if not response.choices:
@@ -873,6 +895,7 @@ class OpenAIlikedTranslator(OpenAITranslator):
         "OPENAILIKED_BASE_URL": None,
         "OPENAILIKED_API_KEY": None,
         "OPENAILIKED_MODEL": None,
+        "OPENAILIKED_EXTRA_KWARGS": "",
     }
     CustomPrompt = True
 
@@ -898,6 +921,7 @@ class OpenAIlikedTranslator(OpenAITranslator):
             base_url=base_url,
             api_key=api_key,
             ignore_cache=ignore_cache,
+            extra_kwargs=self.envs["OPENAILIKED_EXTRA_KWARGS"],
         )
         self.prompttext = prompt
 

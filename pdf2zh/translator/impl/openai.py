@@ -79,15 +79,28 @@ class OpenAITranslator(BaseTranslator):
         ),
     )
     def do_translate(self, text) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            **self.options,
-            max_tokens=len(text) * 5,
-            messages=self.prompt(text, self.prompttext),
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **self.options,
+                max_tokens=len(text) * 5,
+                messages=self.prompt(text, self.prompttext),
+            )
+        except openai.BadRequestError as e:
+            # Maybe the max_tokens is larger than the api accepts
+            if re.findall(r"max[_ ]tokens", e.message, re.I):
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    **self.options,
+                    messages=self.prompt(text, self.prompttext),
+                )
+            else:
+                raise
         if not response.choices:
             if hasattr(response, "error"):
                 raise ValueError("Error response from Service", response.error)
+        if response.choices[0].finish_reason == "length":
+            raise ValueError("Response length limit exceeded")
         content = response.choices[0].message.content.strip()
         content = self.think_filter_regex.sub("", content).strip()
         return content

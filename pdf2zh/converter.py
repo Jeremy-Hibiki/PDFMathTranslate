@@ -135,9 +135,14 @@ class TranslateConverter(PDFConverterEx):
         # e.g. "ollama:gemma2:9b" -> ["ollama", "gemma2:9b"]
         service = [service] if isinstance(service, str) else service
         for service_name in service:
-            param = service_name.split(":", 1)
+            param = service_name.split(":")
             service_name = param[0]
             service_model = param[1] if len(param) > 1 else None
+            try:
+                service_weight = param[2] if len(param) > 2 else 1
+                service_weight = int(service_weight)
+            except ValueError:
+                service_weight = 1
             if not envs:
                 envs = {}
             translator = None
@@ -148,7 +153,8 @@ class TranslateConverter(PDFConverterEx):
             if not translator:
                 log.warning(f"Unsupported translation service: {service_name}, skipped to the next ...")
             else:
-                self.translators.append(translator)
+                for _ in range(service_weight):
+                    self.translators.append(translator)
         if not self.translators:
             raise ValueError("No supported translation service")
 

@@ -408,6 +408,6 @@ class OpenAIlikedTranslator(OpenAITranslator):
             base_url=base_url,
             api_key=api_key,
             ignore_cache=ignore_cache,
-            extra_kwargs=self.envs["OPENAILIKED_EXTRA_KWARGS"],
+            extra_kwargs=self.envs.get("OPENAILIKED_EXTRA_KWARGS", None),
         )
         self.prompttext = prompt

@@ -115,7 +115,7 @@ class TranslateConverter(PDFConverterEx):
         lang_out: str = "",
         service: list[str] | str = "",
         noto_name: str = "",
-        noto: Font = None,
+        font_path: str = "",
         envs: dict = None,
         prompt: Template = None,
         ignore_cache: bool = False,
@@ -128,7 +128,7 @@ class TranslateConverter(PDFConverterEx):
         self.thread = thread
         self.layout = layout
         self.noto_name = noto_name
-        self.noto = noto
+        self.noto = Font(noto_name, font_path)
         self.translators: list[BaseTranslator] = []
         self.max_retries = max_retries
         self.error = error

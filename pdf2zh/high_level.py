@@ -15,6 +15,7 @@ from typing import Any, BinaryIO, Literal
 import numpy as np
 import requests
 import tqdm
+import tqdm.contrib.concurrent
 from babeldoc.assets.assets import get_font_and_metadata
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfexceptions import PDFValueError
@@ -73,7 +74,7 @@ def translate_patch(
     lang_out: str = "",
     service: str = "",
     noto_name: str = "",
-    noto: Font = None,
+    font_path: str = "",
     callback: object = None,
     cancellation_event: asyncio.Event = None,
     model: OnnxModel = None,
@@ -96,7 +97,7 @@ def translate_patch(
         lang_out,
         service,
         noto_name,
-        noto,
+        font_path,
         envs,
         prompt,
         ignore_cache,
@@ -114,50 +115,67 @@ def translate_patch(
 
     parser = PDFParser(inf)
     doc = PDFDocument(parser)
+
+    pdf_pages: list[PDFPage] = []
+    boxes: list[np.ndarray] = []
+    images: list[np.ndarray] = []
+    for pageno, page in enumerate(PDFPage.create_pages(doc)):
+        if cancellation_event and cancellation_event.is_set():
+            raise CancelledError("task cancelled")
+        if pages and (pageno not in pages):
+            continue
+        page.pageno = pageno
+        pdf_pages.append(page)
+        pix = doc_zh[page.pageno].get_pixmap()
+        image = np.fromstring(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
+        images.append(image)
+        boxes.append(np.ones((pix.height, pix.width)))
+
+    page_layouts = model.predict(images, batch_size=16)
+
+    for box, page, page_layout in zip(boxes, pdf_pages, page_layouts, strict=True):
+        if cancellation_event and cancellation_event.is_set():
+            raise CancelledError("task cancelled")
+        h, w = box.shape
+        vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
+        for i, d in enumerate(page_layout.boxes):
+            if page_layout.names[int(d.cls)] not in vcls:
+                x0, y0, x1, y1 = d.xyxy.squeeze()
+                x0, y0, x1, y1 = (
+                    np.clip(int(x0 - 1), 0, w - 1),
+                    np.clip(int(h - y1 - 1), 0, h - 1),
+                    np.clip(int(x1 + 1), 0, w - 1),
+                    np.clip(int(h - y0 + 1), 0, h - 1),
+                )
+                box[y0:y1, x0:x1] = i + 2
+        for _, d in enumerate(page_layout.boxes):
+            if page_layout.names[int(d.cls)] in vcls:
+                x0, y0, x1, y1 = d.xyxy.squeeze()
+                x0, y0, x1, y1 = (
+                    np.clip(int(x0 - 1), 0, w - 1),
+                    np.clip(int(h - y1 - 1), 0, h - 1),
+                    np.clip(int(x1 + 1), 0, w - 1),
+                    np.clip(int(h - y0 + 1), 0, h - 1),
+                )
+                box[y0:y1, x0:x1] = 0
+        layout[page.pageno] = box
+        # 新建一个 xref 存放新指令流
+        page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
+        doc_zh.update_object(page.page_xref, "<<>>")
+        doc_zh.update_stream(page.page_xref, b"")
+        doc_zh[page.pageno].set_contents(page.page_xref)
+
     with tqdm.tqdm(total=total_pages) as progress:
-        for pageno, page in enumerate(PDFPage.create_pages(doc)):
+        for page in pdf_pages:
             if cancellation_event and cancellation_event.is_set():
                 raise CancelledError("task cancelled")
+            pageno = page.pageno
             if pages and (pageno not in pages):
                 continue
-            progress.update()
+            interpreter.process_page(page)
+            progress.update(1)
             if callback:
                 callback(progress)
-            page.pageno = pageno
-            pix = doc_zh[page.pageno].get_pixmap()
-            image = np.fromstring(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
-            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
-            # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
-            box = np.ones((pix.height, pix.width))
-            h, w = box.shape
-            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
-            for i, d in enumerate(page_layout.boxes):
-                if page_layout.names[int(d.cls)] not in vcls:
-                    x0, y0, x1, y1 = d.xyxy.squeeze()
-                    x0, y0, x1, y1 = (
-                        np.clip(int(x0 - 1), 0, w - 1),
-                        np.clip(int(h - y1 - 1), 0, h - 1),
-                        np.clip(int(x1 + 1), 0, w - 1),
-                        np.clip(int(h - y0 + 1), 0, h - 1),
-                    )
-                    box[y0:y1, x0:x1] = i + 2
-            for i, d in enumerate(page_layout.boxes):
-                if page_layout.names[int(d.cls)] in vcls:
-                    x0, y0, x1, y1 = d.xyxy.squeeze()
-                    x0, y0, x1, y1 = (
-                        np.clip(int(x0 - 1), 0, w - 1),
-                        np.clip(int(h - y1 - 1), 0, h - 1),
-                        np.clip(int(x1 + 1), 0, w - 1),
-                        np.clip(int(h - y0 + 1), 0, h - 1),
-                    )
-                    box[y0:y1, x0:x1] = 0
-            layout[page.pageno] = box
-            # 新建一个 xref 存放新指令流
-            page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
-            doc_zh.update_object(page.page_xref, "<<>>")
-            doc_zh.update_stream(page.page_xref, b"")
-            doc_zh[page.pageno].set_contents(page.page_xref)
-            interpreter.process_page(page)
 
     device.close()
     return obj_patch

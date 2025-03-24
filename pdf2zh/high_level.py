@@ -3,6 +3,7 @@
 import asyncio
 import io
 import logging
+import multiprocessing as mp
 import os
 import re
 import sys
@@ -26,7 +27,7 @@ from pymupdf import Document, Font
 
 from pdf2zh.config import ConfigManager
 from pdf2zh.converter import TranslateConverter
-from pdf2zh.doclayout import OnnxModel
+from pdf2zh.doclayout import ModelInstance
 from pdf2zh.pdfinterp import PDFPageInterpreterEx
 
 NOTO_NAME = "noto"
@@ -63,55 +64,16 @@ def check_files(files: list[str]) -> list[str]:
     return missing_files
 
 
-def translate_patch(
+def doclayout_patch(
     inf: BinaryIO,
-    pages: list[int] | None = None,
-    vfont: str = "",
-    vchar: str = "",
-    thread: int = 0,
-    doc_zh: Document = None,
-    lang_in: str = "",
-    lang_out: str = "",
-    service: str = "",
-    noto_name: str = "",
-    font_path: str = "",
-    callback: object = None,
+    doc_zh: Document,
+    pages: list[int],
     cancellation_event: asyncio.Event = None,
-    model: OnnxModel = None,
-    envs: dict = None,
-    prompt: Template = None,
-    ignore_cache: bool = False,
-    max_retries: int = 10,
-    error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
-) -> None:
-    rsrcmgr = PDFResourceManager()
-    layout = {}
-    device = TranslateConverter(
-        rsrcmgr,
-        vfont,
-        vchar,
-        thread,
-        layout,
-        lang_in,
-        lang_out,
-        service,
-        noto_name,
-        font_path,
-        envs,
-        prompt,
-        ignore_cache,
-        max_retries=max_retries,
-        error=error,
-    )
+):
+    model = ModelInstance.value
 
-    assert device is not None
-    obj_patch = {}
-    interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch)
-    if pages:
-        total_pages = len(pages)
-    else:
-        total_pages = doc_zh.page_count
+    layout = {}
 
     parser = PDFParser(inf)
     doc = PDFDocument(parser)
@@ -165,20 +127,82 @@ def translate_patch(
         doc_zh.update_stream(page.page_xref, b"")
         doc_zh[page.pageno].set_contents(page.page_xref)
 
-    with tqdm.tqdm(total=total_pages) as progress:
-        for page in pdf_pages:
-            if cancellation_event and cancellation_event.is_set():
-                raise CancelledError("task cancelled")
-            pageno = page.pageno
-            if pages and (pageno not in pages):
-                continue
-            interpreter.process_page(page)
-            progress.update(1)
-            if callback:
-                callback(progress)
+    # assert len(layout) == len(pdf_pages)
+
+    return layout, pdf_pages
+
+
+def translate_patch(
+    fp: BinaryIO,
+    pagenos: list[int] | int,
+    xrefs: list[int] | int,
+    layout: dict,
+    vfont: str = "",
+    vchar: str = "",
+    thread: int = 0,
+    lang_in: str = "",
+    lang_out: str = "",
+    service: str = "",
+    noto_name: str = "",
+    font_path: str = "",
+    cancellation_event: asyncio.Event = None,
+    envs: dict = None,
+    prompt: Template = None,
+    ignore_cache: bool = False,
+    max_retries: int = 10,
+    error: Literal["raise", "source", "drop"] = "source",
+    **kwarg: Any,
+) -> dict:
+    pagenos = pagenos if isinstance(pagenos, list) else [pagenos]
+    xrefs = xrefs if isinstance(xrefs, list) else [xrefs]
+
+    iter_pages = PDFPage.create_pages(PDFDocument(PDFParser(fp)))
+    pdf_pages = []
+    current_idx = 0
+    for pageno, xref in zip(pagenos, xrefs, strict=True):
+        while current_idx < pageno:
+            pdf_page = next(iter_pages)
+            current_idx += 1
+        pdf_page = next(iter_pages)
+        pdf_page.page_xref = xref
+        pdf_page.pageno = pageno
+        pdf_pages.append(pdf_page)
+        current_idx += 1
+
+    rsrcmgr = PDFResourceManager()
+    device = TranslateConverter(
+        rsrcmgr,
+        vfont,
+        vchar,
+        thread,
+        layout,
+        lang_in,
+        lang_out,
+        service,
+        noto_name,
+        font_path,
+        envs,
+        prompt,
+        ignore_cache,
+        max_retries=max_retries,
+        error=error,
+    )
+
+    assert device is not None
+    obj_patch = {}
+    interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch)
+
+    for pageno in pdf_pages:
+        if cancellation_event and cancellation_event.is_set():
+            raise CancelledError("task cancelled")
+        interpreter.process_page(pageno)
 
     device.close()
     return obj_patch
+
+
+def translate_patch_wrapper(args):
+    return translate_patch(*args)
 
 
 def translate_stream(
@@ -188,11 +212,11 @@ def translate_stream(
     lang_out: str = "",
     service: str = "",
     thread: int = 0,
+    workers: int = 1,
     vfont: str = "",
     vchar: str = "",
     callback: object = None,
     cancellation_event: asyncio.Event = None,
-    model: OnnxModel = None,
     envs: dict = None,
     prompt: Template = None,
     skip_subset_fonts: bool = False,
@@ -246,14 +270,69 @@ def translate_stream(
     fp = io.BytesIO()
 
     doc_zh.save(fp)
-    obj_patch: dict = translate_patch(fp, **locals())
 
-    for obj_id, ops_new in obj_patch.items():
-        # ops_old=doc_en.xref_stream(obj_id)
-        # print(obj_id)
-        # print(ops_old)
-        # print(ops_new.encode())
-        doc_zh.update_stream(obj_id, ops_new.encode())
+    if pages:
+        total_pages = len(pages)
+    else:
+        total_pages = doc_zh.page_count
+        pages = list(range(total_pages))
+
+    layout, pdf_pages = doclayout_patch(
+        fp,
+        doc_zh,
+        pages,
+        cancellation_event,
+    )
+
+    if total_pages > workers:
+        chunksize = total_pages // workers
+    else:
+        chunksize = 1
+
+    obj_patches = []
+
+    with tqdm.tqdm(total=total_pages) as progress:
+
+        def cb(*args, **kwargs):
+            progress.update(1)
+            if callback:
+                callback(progress)
+
+        with mp.Pool(workers) as pool:
+            async_results = []
+            for arg in [
+                (
+                    fp,
+                    p.pageno,
+                    p.page_xref,
+                    layout,
+                    vfont,
+                    vchar,
+                    thread,
+                    lang_in,
+                    lang_out,
+                    service,
+                    noto_name,
+                    font_path,
+                    cancellation_event,
+                    envs,
+                    prompt,
+                    ignore_cache,
+                    max_retries,
+                    error,
+                )
+                for p in pdf_pages
+            ]:
+                async_results.append(pool.apply_async(translate_patch, args=arg, callback=cb))
+            obj_patches = [res.get() for res in async_results]
+
+    for obj_patch in obj_patches:
+        for obj_id, ops_new in obj_patch.items():
+            # ops_old=doc_en.xref_stream(obj_id)
+            # print(obj_id)
+            # print(ops_old)
+            # print(ops_new.encode())
+            doc_zh.update_stream(obj_id, ops_new.encode())
 
     doc_en.insert_file(doc_zh)
     for id in range(page_count):
@@ -341,12 +420,12 @@ def translate(
     lang_out: str = "",
     service: str = "",
     thread: int = 0,
+    workers: int = 1,
     vfont: str = "",
     vchar: str = "",
     callback: object = None,
     compatible: bool = False,
     cancellation_event: asyncio.Event = None,
-    model: OnnxModel = None,
     envs: dict = None,
     prompt: Template = None,
     skip_subset_fonts: bool = False,

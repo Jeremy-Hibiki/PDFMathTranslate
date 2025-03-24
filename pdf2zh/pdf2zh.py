@@ -99,11 +99,18 @@ def create_parser() -> argparse.ArgumentParser:
         help="Output directory for files.",
     )
     parse_params.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=1,
+        help="The number of workers to execute translation.",
+    )
+    parse_params.add_argument(
         "--thread",
         "-t",
         type=int,
         default=4,
-        help="The number of threads to execute translation.",
+        help="The number of threads per worker to execute translation.",
     )
     parse_params.add_argument(
         "--interactive",
@@ -311,10 +318,10 @@ def main(args: list[str] | None = None) -> int:
     if parsed_args.dir:
         untranlate_file = find_all_files_in_directory(parsed_args.files[0])
         parsed_args.files = untranlate_file
-        translate(model=ModelInstance.value, **vars(parsed_args))
+        translate(**vars(parsed_args))
         return 0
 
-    translate(model=ModelInstance.value, **vars(parsed_args))
+    translate(**vars(parsed_args))
     return 0
 
 

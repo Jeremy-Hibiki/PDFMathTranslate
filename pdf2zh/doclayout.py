@@ -166,6 +166,7 @@ class OnnxModel(DocLayoutModel):
         total_images = len(image)
         results = []
 
+        # TODO Different image size in batch
         # Process images in batches
         for i in range(0, total_images, batch_size):
             batch_images = image[i : i + batch_size]

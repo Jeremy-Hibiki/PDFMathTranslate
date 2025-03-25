@@ -113,7 +113,7 @@ def doclayout_patch(
         images.append(image)
         boxes.append(np.ones((pix.height, pix.width)))
 
-    page_layouts = model.predict(images)
+    page_layouts = model.predict(images, batch_size=1)
     # page_layouts = sum([model.predict(im, imgsz=int(im.shape[0] / 32) * 32) for im in images], [])
 
     for box, page, page_layout in zip(boxes, pdf_pages, page_layouts, strict=True):

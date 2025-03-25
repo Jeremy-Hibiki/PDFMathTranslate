@@ -486,9 +486,6 @@ class TranslateConverter(PDFConverterEx):
                             "rtxt": raw_string(self.fontid[vch.font], vc),
                             "lidx": lidx
                         })
-                        if log.isEnabledFor(logging.DEBUG):
-                            lstk.append(LTLine(0.1, (_x, _y), (x + vch.x0 - var[vid][0].x0, fix + y + vch.y0 - var[vid][0].y0)))
-                            _x, _y = x + vch.x0 - var[vid][0].x0, fix + y + vch.y0 - var[vid][0].y0
                     for l in varl[vid]:  # 排版公式线条
                         if l.linewidth < 5:  # hack 有的文档会用粗线条当图片背景
                             ops_vals.append({
@@ -512,9 +509,6 @@ class TranslateConverter(PDFConverterEx):
                 adv -= mod # 文字修饰符
                 fcur = fcur_
                 x += adv
-                if log.isEnabledFor(logging.DEBUG):
-                    lstk.append(LTLine(0.1, (_x, _y), (x, y)))
-                    _x, _y = x, y
             # 处理结尾
             if cstk:
                 ops_vals.append({

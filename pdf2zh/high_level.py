@@ -23,7 +23,7 @@ from pdfminer.pdfexceptions import PDFValueError
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
-from pymupdf import Document, Font
+from pymupdf import Document, Font, Point, Rect
 
 from pdf2zh.config import ConfigManager
 from pdf2zh.converter import TranslateConverter
@@ -71,6 +71,26 @@ def doclayout_patch(
     cancellation_event: asyncio.Event = None,
     **kwarg: Any,
 ):
+    doc_debug = None
+    if logger.isEnabledFor(logging.DEBUG):
+        doc_debug = Document(stream=doc_zh.tobytes())
+        colors = (
+            np.array(
+                [
+                    [102, 102, 255],
+                    [153, 0, 76],
+                    [158, 158, 158],
+                    [153, 255, 51],
+                    [102, 178, 255],
+                    [204, 204, 0],
+                    [255, 255, 102],
+                    [229, 255, 204],
+                    [0, 255, 0],
+                    [40, 169, 92],
+                ]
+            )
+            / 255.0
+        )
     model = ModelInstance.value
 
     layout = {}
@@ -93,7 +113,8 @@ def doclayout_patch(
         images.append(image)
         boxes.append(np.ones((pix.height, pix.width)))
 
-    page_layouts = model.predict(images, batch_size=16)
+    page_layouts = model.predict(images)
+    # page_layouts = sum([model.predict(im, imgsz=int(im.shape[0] / 32) * 32) for im in images], [])
 
     for box, page, page_layout in zip(boxes, pdf_pages, page_layouts, strict=True):
         if cancellation_event and cancellation_event.is_set():
@@ -101,6 +122,26 @@ def doclayout_patch(
         h, w = box.shape
         vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
         for i, d in enumerate(page_layout.boxes):
+            if doc_debug:
+                c, conf = int(d.cls), float(d.conf)
+                name = model._names[c]
+                color = colors[c].tolist()
+                label_text = f"{name}: {conf:.2f}"
+                x0, y0, x1, y1 = d.xyxy.squeeze()
+                doc_debug[page.pageno].draw_rect(
+                    Rect(x0, y0, x1, y1),
+                    color=None,
+                    fill=color,
+                    fill_opacity=0.3,
+                    width=0.5,
+                    overlay=True,
+                )
+                doc_debug[page.pageno].insert_text(
+                    Point(x1 + 2, y0 + 10),
+                    label_text,
+                    fontsize=10,
+                    color=color,
+                )
             if page_layout.names[int(d.cls)] not in vcls:
                 x0, y0, x1, y1 = d.xyxy.squeeze()
                 x0, y0, x1, y1 = (
@@ -127,9 +168,7 @@ def doclayout_patch(
         doc_zh.update_stream(page.page_xref, b"")
         doc_zh[page.pageno].set_contents(page.page_xref)
 
-    # assert len(layout) == len(pdf_pages)
-
-    return layout, pdf_pages
+    return layout, pdf_pages, doc_debug
 
 
 def translate_patch(
@@ -277,7 +316,7 @@ def translate_stream(
         total_pages = doc_zh.page_count
         pages = list(range(total_pages))
 
-    layout, pdf_pages = doclayout_patch(
+    layout, pdf_pages, doc_debug = doclayout_patch(
         fp,
         doc_zh,
         pages,
@@ -360,6 +399,7 @@ def translate_stream(
     return (
         doc_zh.write(deflate=True, garbage=3, use_objstms=1),
         doc_en.write(deflate=True, garbage=3, use_objstms=1),
+        doc_debug.write(deflate=True, garbage=3, use_objstms=1) if doc_debug else None,
     )
 
 
@@ -487,7 +527,7 @@ def translate(
         except Exception:
             logger.warning(f"Failed to clean temp file {file_path}", exc_info=True)
 
-        s_mono, s_dual = translate_stream(
+        s_mono, s_dual, s_debug = translate_stream(
             s_raw,
             **locals(),
         )
@@ -499,6 +539,11 @@ def translate(
         doc_dual.write(s_dual)
         doc_mono.close()
         doc_dual.close()
+        if s_debug:
+            file_debug = Path(output) / f"{filename}-debug.pdf"
+            doc_debug = open(file_debug, "wb")
+            doc_debug.write(s_debug)
+            doc_debug.close()
         result_files.append((str(file_mono), str(file_dual)))
 
     return result_files

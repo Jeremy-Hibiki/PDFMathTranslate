@@ -350,7 +350,7 @@ class TranslateConverter(PDFConverterEx):
                 while translator:
                     try:
                         new = translator.translate(s)
-                        return new
+                        return new.replace("\n", " ")
                     except BaseException as e:
                         if log.isEnabledFor(logging.DEBUG):
                             log.exception(e)

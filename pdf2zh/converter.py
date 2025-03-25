@@ -19,6 +19,8 @@ from pdf2zh.translator import BaseTranslator, TranslatorRegistry
 
 log = logging.getLogger(__name__)
 
+CONTROL_CHAR_PAT = re.compile(r"[\x00-\x1F\x7F]")
+
 
 class PDFConverterEx(PDFConverter):
     def __init__(
@@ -350,7 +352,7 @@ class TranslateConverter(PDFConverterEx):
                 while translator:
                     try:
                         new = translator.translate(s)
-                        return new.replace("\n", " ")
+                        return re.sub(CONTROL_CHAR_PAT, "", new)
                     except BaseException as e:
                         if log.isEnabledFor(logging.DEBUG):
                             log.exception(e)

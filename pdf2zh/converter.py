@@ -28,8 +28,11 @@ class PDFConverterEx(PDFConverter):
         rsrcmgr: PDFResourceManager,
     ) -> None:
         PDFConverter.__init__(self, rsrcmgr, None, "utf-8", 1, None)
+        self.page_rotations = {}  # 存储页面旋转信息
 
     def begin_page(self, page, ctm) -> None:
+        # 记录页面旋转信息
+        self.page_rotations[page.pageno] = page.rotate
         # 重载替换 cropbox
         (x0, y0, x1, y1) = page.cropbox
         (x0, y0) = apply_matrix_pt(ctm, (x0, y0))
@@ -161,6 +164,26 @@ class TranslateConverter(PDFConverterEx):
             raise ValueError("No supported translation service")
 
     def receive_layout(self, ltpage: LTPage):
+        # 获取页面旋转信息
+        rotation = self.page_rotations.get(ltpage.pageid, 0)
+        # 获取页面尺寸，用于坐标变换
+        page_width = ltpage.width
+        page_height = ltpage.height
+
+        def get_rotation_matrix():
+            nonlocal rotation
+            if rotation == 0:
+                return (1, 0, 0, 1)
+            elif rotation == 90:
+                return (0, 1, -1, 0)
+            elif rotation == 180:
+                return (-1, 0, 0, -1)
+            elif rotation == 270:
+                return (0, -1, 1, 0, 0)
+            else: # 暂不考虑非 90 度旋转
+                return (1, 0, 0, 1)
+        rotation_matrix = get_rotation_matrix()
+
         # 段落
         sstk: list[str] = []            # 段落文字栈
         pstk: list[Paragraph] = []      # 段落属性栈
@@ -398,14 +421,27 @@ class TranslateConverter(PDFConverterEx):
             "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8
         }
         default_line_height = LANG_LINEHEIGHT_MAP.get(self.translators[0].lang_out.lower(), 1.1) # 小语种默认1.1
-        _x, _y = 0, 0
         ops_list = []
 
+        def rotate_xy(x, y):
+            a, b, c, d = rotation_matrix
+            if rotation == 90:
+                tx, ty = page_height - y, x
+            elif rotation == 180:
+                tx, ty = page_width - x, page_height - y
+            elif rotation == 270:
+                tx, ty = y, page_width - x
+            else:
+                tx, ty = x, y
+            return a, b, c, d, tx, ty
+
         def gen_op_txt(font, size, x, y, rtxt):
-            return f"/{font} {size:f} Tf 1 0 0 1 {x:f} {y:f} Tm [<{rtxt}>] TJ "
+            a, b, c, d, tx, ty = rotate_xy(x, y)
+            return f"/{font} {size:f} Tf {a} {b} {c} {d} {tx:f} {ty:f} Tm [<{rtxt}>] TJ "
 
         def gen_op_line(x, y, xlen, ylen, linewidth):
-            return f"ET q 1 0 0 1 {x:f} {y:f} cm [] 0 d 0 J {linewidth:f} w 0 0 m {xlen:f} {ylen:f} l S Q BT "
+            a, b, c, d, tx, ty = rotate_xy(x, y)
+            return f"ET q {a} {b} {c} {d} {tx:f} {ty:f} cm [] 0 d 0 J {linewidth:f} w 0 0 m {xlen:f} {ylen:f} l S Q BT "
 
         for id, new in enumerate(news):
             x: float = pstk[id].x                       # 段落初始横坐标

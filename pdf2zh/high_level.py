@@ -24,6 +24,7 @@ from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font, Point, Rect
+from pymupdf import Page as MupdfPage
 
 from pdf2zh.config import ConfigManager
 from pdf2zh.converter import TranslateConverter
@@ -128,19 +129,22 @@ def doclayout_patch(
                 color = colors[c].tolist()
                 label_text = f"{name}: {conf:.2f}"
                 x0, y0, x1, y1 = d.xyxy.squeeze()
-                doc_debug[page.pageno].draw_rect(
-                    Rect(x0, y0, x1, y1),
+                mupdf_page: MupdfPage = doc_debug[page.pageno]
+                tm = mupdf_page.derotation_matrix
+                mupdf_page.draw_rect(
+                    Rect(x0, y0, x1, y1) * tm,
                     color=None,
                     fill=color,
                     fill_opacity=0.3,
                     width=0.5,
                     overlay=True,
                 )
-                doc_debug[page.pageno].insert_text(
-                    Point(x1 + 2, y0 + 10),
+                mupdf_page.insert_text(
+                    Point(x1 + 2, y0 + 10) * tm,
                     label_text,
                     fontsize=10,
                     color=color,
+                    rotate=mupdf_page.rotation,
                 )
             if page_layout.names[int(d.cls)] not in vcls:
                 x0, y0, x1, y1 = d.xyxy.squeeze()

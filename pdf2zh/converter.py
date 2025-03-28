@@ -179,7 +179,7 @@ class TranslateConverter(PDFConverterEx):
             elif rotation == 180:
                 return (-1, 0, 0, -1)
             elif rotation == 270:
-                return (0, -1, 1, 0, 0)
+                return (0, -1, 1, 0)
             else: # 暂不考虑非 90 度旋转
                 return (1, 0, 0, 1)
         rotation_matrix = get_rotation_matrix()

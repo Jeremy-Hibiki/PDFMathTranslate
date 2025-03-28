@@ -384,17 +384,17 @@ def translate_stream(
     if not skip_subset_fonts:
         try:
             try:
-                doc_zh_copy = Document(stream=doc_zh.write(deflate=True, garbage=3, use_objstms=1))
+                doc_zh_copy = Document(stream=doc_zh.write())
                 doc_zh_copy.subset_fonts()
-                doc_en_copy = Document(stream=doc_en.write(deflate=True, garbage=3, use_objstms=1))
+                doc_en_copy = Document(stream=doc_en.write())
                 doc_en_copy.subset_fonts()
                 doc_zh = doc_zh_copy
                 doc_en = doc_en_copy
             except Exception:
                 logger.warning("Trying the fallback method to subset fonts", stack_info=True)
-                doc_zh_copy = Document(stream=doc_zh.write(deflate=True, garbage=3, use_objstms=1))
+                doc_zh_copy = Document(stream=doc_zh.write())
                 doc_zh_copy.subset_fonts(fallback=True)
-                doc_en_copy = Document(stream=doc_en.write(deflate=True, garbage=3, use_objstms=1))
+                doc_en_copy = Document(stream=doc_en.write())
                 doc_en_copy.subset_fonts(fallback=True)
                 doc_zh = doc_zh_copy
                 doc_en = doc_en_copy

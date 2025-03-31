@@ -72,11 +72,11 @@ class OpenAITranslator(BaseTranslator):
 
     @retry(
         retry=retry_if_exception_type(openai.RateLimitError),
-        stop=stop_after_attempt(100),
+        stop=stop_after_attempt(10),
         wait=wait_exponential(multiplier=1, min=1, max=15),
         before_sleep=lambda retry_state: logger.warning(
             f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
-            f"(Attempt {retry_state.attempt_number}/100)"
+            f"(Attempt {retry_state.attempt_number}/10)"
         ),
     )
     def do_translate(self, text) -> str:

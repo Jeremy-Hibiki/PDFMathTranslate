@@ -124,16 +124,6 @@ def create_parser() -> argparse.ArgumentParser:
         help="Enable Gradio Share",
     )
     parse_params.add_argument(
-        "--flask",
-        action="store_true",
-        help="flask",
-    )
-    parse_params.add_argument(
-        "--celery",
-        action="store_true",
-        help="celery",
-    )
-    parse_params.add_argument(
         "--authorized",
         type=str,
         nargs="+",
@@ -290,18 +280,6 @@ def main(args: list[str] | None = None) -> int:
             setup_gui(parsed_args.share, parsed_args.authorized, int(parsed_args.serverport))
         else:
             setup_gui(parsed_args.share, parsed_args.authorized)
-        return 0
-
-    if parsed_args.flask:
-        from pdf2zh.backend import flask_app
-
-        flask_app.run(port=11008)
-        return 0
-
-    if parsed_args.celery:
-        from pdf2zh.backend import celery_app
-
-        celery_app.start(argv=sys.argv[2:])
         return 0
 
     if parsed_args.prompt:

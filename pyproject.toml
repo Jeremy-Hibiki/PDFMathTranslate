@@ -21,14 +21,12 @@ dependencies = [
     "deepl",
     "openai",
     "azure-ai-translation-text<=1.0.1",
-    "gradio",
     "huggingface_hub",
     "onnx",
     "onnxruntime",
     "opencv-python-headless",
     "tencentcloud-sdk-python-tmt",
     "pdfminer.six>=20240706",
-    "gradio_pdf>=0.0.21",
     "pikepdf",
     "peewee>=3.17.8",
     "fontTools",
@@ -63,6 +61,7 @@ dev = [
 ]
 
 [project.optional-dependencies]
+gui = ["gradio", "gradio_pdf>=0.0.21"]
 argostranslate = ["argostranslate"]
 
 [project.urls]

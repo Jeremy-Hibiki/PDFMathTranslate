@@ -6,6 +6,7 @@ import re
 import openai
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from pdf2zh.tokenizer import TokenizerManager
 from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
 
 logger = logging.getLogger(__name__)
@@ -79,12 +80,14 @@ class OpenAITranslator(BaseTranslator):
         ),
     )
     def do_translate(self, text) -> str:
+        messages = self.prompt(text, self.prompttext)
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 **self.options,
-                max_tokens=len(text) * 5,
-                messages=self.prompt(text, self.prompttext),
+                # 短文本 Token 估算容易非常不准
+                max_tokens=max(20, TokenizerManager.count_tokens(text) * 2),
+                messages=messages,
             )
         except openai.BadRequestError as e:
             # Maybe the max_tokens is larger than the api accepts
@@ -92,7 +95,7 @@ class OpenAITranslator(BaseTranslator):
                 response = self.client.chat.completions.create(
                     model=self.model,
                     **self.options,
-                    messages=self.prompt(text, self.prompttext),
+                    messages=messages,
                 )
             else:
                 raise

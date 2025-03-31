@@ -34,6 +34,7 @@ dependencies = [
     "fontTools",
     "babeldoc>=0.1.22, <0.3.0",
     "rich",
+    "tiktoken>=0.9.0",
 ]
 
 [dependency-groups]

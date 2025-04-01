@@ -195,6 +195,7 @@ class OnnxModel(DocLayoutModel):
             for j in range(batch_size_actual):
                 preds = batch_preds[j]
                 preds = preds[preds[..., 4] > 0.25]
+                preds = self.nms(preds)
                 if len(preds) > 0:
                     preds[..., :4] = self.scale_boxes(
                         (new_h, new_w),
@@ -204,6 +205,44 @@ class OnnxModel(DocLayoutModel):
                 results.append(YoloResult(boxes=preds, names=self._names))
 
         return results
+
+    def nms(
+        self,
+        preds: np.ndarray,
+        iou_threshold: float = 0.45,
+    ):
+        """
+        Non-maximum suppression for object detection.
+        """
+        if preds.shape[0] == 0:
+            return preds
+
+        x1 = preds[..., 0]
+        y1 = preds[..., 1]
+        x2 = preds[..., 2]
+        y2 = preds[..., 3]
+        scores = preds[..., 4]
+        areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+        order = scores.argsort()[::-1]
+
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+
+            w = np.maximum(0, xx2 - xx1 + 1)
+            h = np.maximum(0, yy2 - yy1 + 1)
+            inter = w * h
+            iou = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(iou <= iou_threshold)[0]
+            order = order[inds + 1]
+
+        return preds[keep]
 
 
 class ModelInstance:

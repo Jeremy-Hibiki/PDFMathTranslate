@@ -351,7 +351,8 @@ class TranslateConverter(PDFConverterEx):
             var.append(vstk)
             varl.append(vlstk)
             varf.append(vfix)
-        log.debug("\n==========[VSTACK]==========\n")
+        if len(var):
+            log.debug("\n==========[VSTACK]==========\n")
         for id, v in enumerate(var):  # 计算公式宽度
             l = max([vch.x1 for vch in v]) - v[0].x0
             log.debug(f'< {l:.1f} {v[0].x0:.1f} {v[0].y0:.1f} {v[0].cid} {v[0].fontname} {len(varl[id])} > v{id} = {"".join([ch.get_text() for ch in v])}')
@@ -359,7 +360,8 @@ class TranslateConverter(PDFConverterEx):
 
         ############################################################
         # B. 段落翻译
-        log.debug("\n==========[SSTACK]==========\n")
+        if len(sstk):
+            log.debug("\n==========[SSTACK]==========\n")
 
         def worker(s: str):  # 多线程翻译
             @retry(
@@ -457,7 +459,7 @@ class TranslateConverter(PDFConverterEx):
             tx = x
             fcur_ = fcur
             ptr = 0
-            log.debug(f"< {y} {x} {x0} {x1} {size} {brk} > {sstk[id]} | {new}")
+            log.debug(f"< {y=:.2f} {x=:.2f} {x0=:.2f} {x1=:.2f} {size=:.2f} {brk=} >\n{sstk[id]}\n{new}")
 
             ops_vals: list[dict] = []
 

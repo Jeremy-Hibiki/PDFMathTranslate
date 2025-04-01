@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from asyncio import CancelledError
 from pathlib import Path
 from string import Template
@@ -18,9 +19,11 @@ import requests
 import tqdm
 import tqdm.contrib.concurrent
 from babeldoc.assets.assets import get_font_and_metadata
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.layout import LAParams, LTTextBox, LTTextLine
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfexceptions import PDFValueError
-from pdfminer.pdfinterp import PDFResourceManager
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font, Point, Rect
@@ -57,6 +60,24 @@ noto_list = [
     "uk",  # Ukrainian
 ]
 
+colors = (
+    np.array(
+        [
+            [102, 102, 255],  # 0:title, rgb(102, 102, 255)
+            [153, 0, 76],  # 1:plain text, rgb(153, 0, 76)
+            [158, 158, 158],  # 2:abandon, rgb(158, 158, 158)
+            [153, 255, 51],  # 3:figure, rgb(153, 255, 51)
+            [102, 178, 255],  # 4:figure caption, rgb(102, 178, 255)
+            [204, 204, 0],  # 5:table, rgb(204, 204, 0)
+            [255, 255, 102],  # 6:table caption, rgb(255, 255, 102)
+            [229, 255, 204],  # 7:table footnote, rgb(229, 255, 204)
+            [0, 255, 0],  # 8:isolate formula, rgb(0, 255, 0)
+            [40, 169, 92],  # 9:formula caption, rgb(40, 169, 92)
+        ]
+    )
+    / 255.0
+)
+
 
 def check_files(files: list[str]) -> list[str]:
     files = [f for f in files if not f.startswith("http://")]  # exclude online files, http
@@ -75,23 +96,6 @@ def doclayout_patch(
     doc_debug = None
     if logger.isEnabledFor(logging.DEBUG):
         doc_debug = Document(stream=doc_zh.tobytes())
-        colors = (
-            np.array(
-                [
-                    [102, 102, 255],
-                    [153, 0, 76],
-                    [158, 158, 158],
-                    [153, 255, 51],
-                    [102, 178, 255],
-                    [204, 204, 0],
-                    [255, 255, 102],
-                    [229, 255, 204],
-                    [0, 255, 0],
-                    [40, 169, 92],
-                ]
-            )
-            / 255.0
-        )
     model = ModelInstance.value
 
     layout = {}
@@ -110,19 +114,59 @@ def doclayout_patch(
         page.pageno = pageno
         pdf_pages.append(page)
         pix = doc_zh[page.pageno].get_pixmap()
-        image = np.fromstring(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
+        image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
         images.append(image)
         boxes.append(np.ones((pix.height, pix.width)))
 
-    page_layouts = model.predict(images, batch_size=1)
-    # page_layouts = sum([model.predict(im, imgsz=int(im.shape[0] / 32) * 32) for im in images], [])
+    layout_detection_start = time.time()
+    yolo_results = model.predict(images, batch_size=1)
+    layout_detection_end = time.time()
+    logger.info(
+        f"Layout Detection Time ({len(yolo_results)} pages): {(layout_detection_end - layout_detection_start):.4f}"
+    )
+    # yolo_results = sum([model.predict(im, imgsz=int(im.shape[0] / 32) * 32) for im in images], [])
 
-    for box, page, page_layout in zip(boxes, pdf_pages, page_layouts, strict=True):
+    # 按 block 矫正左右边界
+    rsrcmgr = PDFResourceManager()
+    device = PDFPageAggregator(rsrcmgr, laparams=LAParams())
+    interpreter = PDFPageInterpreter(rsrcmgr, device)
+    calibrate_bbox_start = time.time()
+    for box, page, yolo_res in zip(boxes, pdf_pages, yolo_results, strict=True):
+        h, w = box.shape
+        interpreter.process_page(page)
+        text_boxes = [e for e in device.get_result() if isinstance(e, LTTextBox)]
+        for _, d in enumerate(yolo_res.boxes):
+            x0, y0, x1, y1 = d.xyxy.squeeze()
+            for tb in text_boxes:
+                line = next(filter(lambda e: isinstance(e, LTTextLine), tb), None)
+                if line is None:
+                    continue
+                lh = line.height
+                tbx0, tby0, tbx1, tby1 = tb.bbox
+                tbx0, tby0, tbx1, tby1 = (
+                    np.clip(tbx0 - 1, 0, w - 1),
+                    np.clip(h - tby1 - 1, 0, h - 1),
+                    np.clip(tbx1 + 1, 0, w - 1),
+                    np.clip(h - tby0 + 1, 0, h - 1),
+                )
+                w_tolerance = 0.2 * tb.width
+                if (
+                    y0 <= tby0 + lh / 2 and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
+                ) and (
+                    tbx0 <= x0 <= tbx0 + w_tolerance  # block 左边界比检测框小 20%
+                    or tbx1 - w_tolerance <= x1 <= tbx1  # block 右边界比检测框宽大 20%
+                ):
+                    d.xyxy[0] = min(x0, tbx0)
+                    d.xyxy[2] = max(x1, tbx1)
+    calibrate_bbox_end = time.time()
+    logger.info(f"Calibrate Detection Bbox Time: {(calibrate_bbox_end - calibrate_bbox_start):.4f}")
+
+    for box, page, yolo_res in zip(boxes, pdf_pages, yolo_results, strict=True):
         if cancellation_event and cancellation_event.is_set():
             raise CancelledError("task cancelled")
         h, w = box.shape
         vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
-        for i, d in enumerate(page_layout.boxes):
+        for i, d in enumerate(yolo_res.boxes):
             if doc_debug:
                 c, conf = int(d.cls), float(d.conf)
                 name = model._names[c]
@@ -146,7 +190,7 @@ def doclayout_patch(
                     color=color,
                     rotate=mupdf_page.rotation,
                 )
-            if page_layout.names[int(d.cls)] not in vcls:
+            if yolo_res.names[int(d.cls)] not in vcls:
                 x0, y0, x1, y1 = d.xyxy.squeeze()
                 x0, y0, x1, y1 = (
                     np.clip(int(x0 - 1), 0, w - 1),
@@ -155,8 +199,8 @@ def doclayout_patch(
                     np.clip(int(h - y0 + 1), 0, h - 1),
                 )
                 box[y0:y1, x0:x1] = i + 2
-        for _, d in enumerate(page_layout.boxes):
-            if page_layout.names[int(d.cls)] in vcls:
+        for _, d in enumerate(yolo_res.boxes):
+            if yolo_res.names[int(d.cls)] in vcls:
                 x0, y0, x1, y1 = d.xyxy.squeeze()
                 x0, y0, x1, y1 = (
                     np.clip(int(x0 - 1), 0, w - 1),
@@ -200,15 +244,15 @@ def translate_patch(
     xrefs = xrefs if isinstance(xrefs, list) else [xrefs]
 
     iter_pages = PDFPage.create_pages(PDFDocument(PDFParser(fp)))
-    pdf_pages = []
+    pdf_pages: list[PDFPage] = []
     current_idx = 0
-    for pageno, xref in zip(pagenos, xrefs, strict=True):
-        while current_idx < pageno:
+    for page, xref in zip(pagenos, xrefs, strict=True):
+        while current_idx < page:
             pdf_page = next(iter_pages)
             current_idx += 1
         pdf_page = next(iter_pages)
         pdf_page.page_xref = xref
-        pdf_page.pageno = pageno
+        pdf_page.pageno = page
         pdf_pages.append(pdf_page)
         current_idx += 1
 
@@ -235,17 +279,13 @@ def translate_patch(
     obj_patch = {}
     interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch)
 
-    for pageno in pdf_pages:
+    for page in pdf_pages:
         if cancellation_event and cancellation_event.is_set():
             raise CancelledError("task cancelled")
-        interpreter.process_page(pageno)
+        interpreter.process_page(page)
 
     device.close()
     return obj_patch
-
-
-def translate_patch_wrapper(args):
-    return translate_patch(*args)
 
 
 def translate_stream(
@@ -326,11 +366,6 @@ def translate_stream(
         pages,
         cancellation_event,
     )
-
-    if total_pages > workers:
-        chunksize = total_pages // workers
-    else:
-        chunksize = 1
 
     obj_patches = []
 

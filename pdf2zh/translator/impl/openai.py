@@ -84,7 +84,6 @@ class OpenAITranslator(BaseTranslator):
         try:
             tokens = TokenizerManager.count_tokens(text)
             max_tokens = int(max(20, tokens * 2))  # 短文本 Token 估算容易非常不准
-            logger.debug(f"{tokens=} {max_tokens=}")
             response = self.client.chat.completions.create(
                 model=self.model,
                 **self.options,

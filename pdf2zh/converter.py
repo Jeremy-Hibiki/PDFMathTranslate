@@ -115,7 +115,7 @@ class TranslateConverter(PDFConverterEx):
         vfont: str = None,
         vchar: str = None,
         thread: int = 0,
-        layout={},
+        box: np.ndarray = None,
         lang_in: str = "",
         lang_out: str = "",
         service: list[str] | str = "",
@@ -131,7 +131,7 @@ class TranslateConverter(PDFConverterEx):
         self.vfont = vfont
         self.vchar = vchar
         self.thread = thread
-        self.layout = layout
+        self.box = box
         self.noto_name = noto_name
         self.noto = Font(noto_name, font_path)
         self.translators: list[BaseTranslator] = []
@@ -245,12 +245,11 @@ class TranslateConverter(PDFConverterEx):
         for child in ltpage:
             if isinstance(child, LTChar):
                 cur_v = False
-                layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
-                h, w = layout.shape
+                h, w = self.box.shape
                 # 读取当前字符在 layout 中的类别
                 cx, cy = np.clip(int(child.x0), 0, w - 1), np.clip(int(child.y0), 0, h - 1)
-                cls = layout[cy, cx]
+                cls = self.box[cy, cx]
                 # 锚定文档中 bullet 的位置
                 if child.get_text() == "•":
                     cls = 0
@@ -333,12 +332,11 @@ class TranslateConverter(PDFConverterEx):
             elif isinstance(child, LTFigure):   # 图表
                 pass
             elif isinstance(child, LTLine):     # 线条
-                layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
-                h, w = layout.shape
+                h, w = self.box.shape
                 # 读取当前线条在 layout 中的类别
                 cx, cy = np.clip(int(child.x0), 0, w - 1), np.clip(int(child.y0), 0, h - 1)
-                cls = layout[cy, cx]
+                cls = self.box[cy, cx]
                 if vstk and cls == xt_cls:      # 公式线条
                     vlstk.append(child)
                 else:                           # 全局线条

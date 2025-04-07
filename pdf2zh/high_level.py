@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 from asyncio import CancelledError
+from multiprocessing.pool import AsyncResult
 from pathlib import Path
 from string import Template
 from typing import Any, BinaryIO, Literal
@@ -221,9 +222,9 @@ def doclayout_patch(
 
 def translate_patch(
     fp: BinaryIO,
-    pagenos: list[int] | int,
-    xrefs: list[int] | int,
-    layout: dict,
+    pageno: int,
+    xref: int,
+    box: np.ndarray,
     vfont: str = "",
     vchar: str = "",
     thread: int = 0,
@@ -240,21 +241,15 @@ def translate_patch(
     error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
 ) -> dict:
-    pagenos = pagenos if isinstance(pagenos, list) else [pagenos]
-    xrefs = xrefs if isinstance(xrefs, list) else [xrefs]
-
     iter_pages = PDFPage.create_pages(PDFDocument(PDFParser(fp)))
-    pdf_pages: list[PDFPage] = []
     current_idx = 0
-    for page, xref in zip(pagenos, xrefs, strict=True):
-        while current_idx < page:
-            pdf_page = next(iter_pages)
-            current_idx += 1
+    pdf_page = None
+    while current_idx < pageno:
         pdf_page = next(iter_pages)
-        pdf_page.page_xref = xref
-        pdf_page.pageno = page
-        pdf_pages.append(pdf_page)
         current_idx += 1
+    pdf_page = next(iter_pages)
+    pdf_page.page_xref = xref
+    pdf_page.pageno = pageno
 
     rsrcmgr = PDFResourceManager()
     device = TranslateConverter(
@@ -262,7 +257,7 @@ def translate_patch(
         vfont,
         vchar,
         thread,
-        layout,
+        box,
         lang_in,
         lang_out,
         service,
@@ -279,10 +274,7 @@ def translate_patch(
     obj_patch = {}
     interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch)
 
-    for page in pdf_pages:
-        if cancellation_event and cancellation_event.is_set():
-            raise CancelledError("task cancelled")
-        interpreter.process_page(page)
+    interpreter.process_page(pdf_page)
 
     device.close()
     return obj_patch
@@ -306,6 +298,7 @@ def translate_stream(
     ignore_cache: bool = False,
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
+    onnx: str = None,
     **kwarg: Any,
 ):
     font_list = [("tiro", None)]
@@ -365,6 +358,7 @@ def translate_stream(
         doc_zh,
         pages,
         cancellation_event,
+        onnx,
     )
 
     obj_patches = []
@@ -377,13 +371,13 @@ def translate_stream(
                 callback(progress)
 
         with mp.Pool(workers) as pool:
-            async_results = []
+            async_results: list[AsyncResult] = []
             for arg in [
                 (
                     fp,
                     p.pageno,
                     p.page_xref,
-                    layout,
+                    layout[p.pageno],
                     vfont,
                     vchar,
                     thread,
@@ -511,6 +505,7 @@ def translate(
     ignore_cache: bool = False,
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
+    onnx: str = None,
     **kwarg: Any,
 ):
     if not files:

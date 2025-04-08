@@ -8,8 +8,9 @@ import os
 import re
 import sys
 import tempfile
-import time
 from asyncio import CancelledError
+from collections.abc import Callable
+from enum import StrEnum
 from multiprocessing.pool import AsyncResult
 from pathlib import Path
 from string import Template
@@ -32,7 +33,7 @@ from pymupdf import Page as MupdfPage
 
 from pdf2zh.config import ConfigManager
 from pdf2zh.converter import TranslateConverter
-from pdf2zh.doclayout import ModelInstance
+from pdf2zh.doclayout import ModelInstance, YoloResult
 from pdf2zh.pdfinterp import PDFPageInterpreterEx
 
 NOTO_NAME = "noto"
@@ -80,6 +81,13 @@ colors = (
 )
 
 
+class PDFTranslateStage(StrEnum):
+    PAGES_TO_IMAGES = "Pages to Images"
+    LAYOUT_DETECTION = "Layout Detection"
+    LAYOUT_CALIBRATION = "Layout Calibration"
+    TRANSLATION = "Translation"
+
+
 def check_files(files: list[str]) -> list[str]:
     files = [f for f in files if not f.startswith("http://")]  # exclude online files, http
     files = [f for f in files if not f.startswith("https://")]  # exclude online files, https
@@ -92,6 +100,7 @@ def doclayout_patch(
     doc_zh: Document,
     pages: list[int],
     cancellation_event: asyncio.Event = None,
+    callback: Callable[[PDFTranslateStage, tqdm.tqdm], Any] | None = None,
     **kwarg: Any,
 ):
     doc_debug = None
@@ -107,60 +116,85 @@ def doclayout_patch(
     pdf_pages: list[PDFPage] = []
     boxes: list[np.ndarray] = []
     images: list[np.ndarray] = []
-    for pageno, page in enumerate(PDFPage.create_pages(doc)):
-        if cancellation_event and cancellation_event.is_set():
-            raise CancelledError("task cancelled")
-        if pages and (pageno not in pages):
-            continue
-        page.pageno = pageno
-        pdf_pages.append(page)
-        pix = doc_zh[page.pageno].get_pixmap()
-        image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
-        images.append(image)
-        boxes.append(np.ones((pix.height, pix.width)))
 
-    layout_detection_start = time.time()
-    yolo_results = model.predict(images, batch_size=1)
-    layout_detection_end = time.time()
-    logger.info(
-        f"Layout Detection Time ({len(yolo_results)} pages): {(layout_detection_end - layout_detection_start):.4f}"
-    )
-    # yolo_results = sum([model.predict(im, imgsz=int(im.shape[0] / 32) * 32) for im in images], [])
+    with tqdm.tqdm(total=len(pages), desc=PDFTranslateStage.PAGES_TO_IMAGES) as progress:
+
+        def cb():
+            nonlocal progress, callback
+            progress.update(1)
+            if callback:
+                callback(PDFTranslateStage.PAGES_TO_IMAGES, progress)
+
+        for pageno, page in enumerate(PDFPage.create_pages(doc)):
+            if cancellation_event and cancellation_event.is_set():
+                raise CancelledError("task cancelled")
+            if pages and (pageno not in pages):
+                continue
+            page.pageno = pageno
+            pdf_pages.append(page)
+            pix = doc_zh[page.pageno].get_pixmap()
+            image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
+            images.append(image)
+            boxes.append(np.ones((pix.height, pix.width)))
+            cb()
+
+    yolo_results: list[YoloResult] = []
+    with tqdm.tqdm(total=len(images), desc=PDFTranslateStage.LAYOUT_DETECTION) as progress:
+
+        def cb():
+            nonlocal progress, callback
+            progress.update(1)
+            if callback:
+                callback(PDFTranslateStage.LAYOUT_DETECTION, progress)
+
+        for image in images:
+            if cancellation_event and cancellation_event.is_set():
+                raise CancelledError("task cancelled")
+            yolo_results.extend(model.predict(image, batch_size=1))
+            cb()
+    # yolo_results = model.predict(images, batch_size=1)
 
     # 按 block 矫正左右边界
     rsrcmgr = PDFResourceManager()
     device = PDFPageAggregator(rsrcmgr, laparams=LAParams())
     interpreter = PDFPageInterpreter(rsrcmgr, device)
-    calibrate_bbox_start = time.time()
-    for box, page, yolo_res in zip(boxes, pdf_pages, yolo_results, strict=True):
-        h, w = box.shape
-        interpreter.process_page(page)
-        text_boxes = [e for e in device.get_result() if isinstance(e, LTTextBox)]
-        for _, d in enumerate(yolo_res.boxes):
-            x0, y0, x1, y1 = d.xyxy.squeeze()
-            for tb in text_boxes:
-                line = next(filter(lambda e: isinstance(e, LTTextLine), tb), None)
-                if line is None:
-                    continue
-                lh = line.height
-                tbx0, tby0, tbx1, tby1 = tb.bbox
-                tbx0, tby0, tbx1, tby1 = (
-                    np.clip(tbx0 - 1, 0, w - 1),
-                    np.clip(h - tby1 - 1, 0, h - 1),
-                    np.clip(tbx1 + 1, 0, w - 1),
-                    np.clip(h - tby0 + 1, 0, h - 1),
-                )
-                w_tolerance = 0.2 * tb.width
-                if (
-                    y0 <= tby0 + lh / 2 and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
-                ) and (
-                    tbx0 <= x0 <= tbx0 + w_tolerance  # block 左边界比检测框小 20%
-                    or tbx1 - w_tolerance <= x1 <= tbx1  # block 右边界比检测框宽大 20%
-                ):
-                    d.xyxy[0] = min(x0, tbx0)
-                    d.xyxy[2] = max(x1, tbx1)
-    calibrate_bbox_end = time.time()
-    logger.info(f"Calibrate Detection Bbox Time: {(calibrate_bbox_end - calibrate_bbox_start):.4f}")
+
+    with tqdm.tqdm(total=len(pdf_pages), desc=PDFTranslateStage.LAYOUT_CALIBRATION) as progress:
+
+        def cb():
+            nonlocal progress, callback
+            progress.update(1)
+            if callback:
+                callback(PDFTranslateStage.LAYOUT_CALIBRATION, progress)
+
+        for box, page, yolo_res in zip(boxes, pdf_pages, yolo_results, strict=True):
+            h, w = box.shape
+            interpreter.process_page(page)
+            text_boxes = [e for e in device.get_result() if isinstance(e, LTTextBox)]
+            for _, d in enumerate(yolo_res.boxes):
+                x0, y0, x1, y1 = d.xyxy.squeeze()
+                for tb in text_boxes:
+                    line = next(filter(lambda e: isinstance(e, LTTextLine), tb), None)
+                    if line is None:
+                        continue
+                    lh = line.height
+                    tbx0, tby0, tbx1, tby1 = tb.bbox
+                    tbx0, tby0, tbx1, tby1 = (
+                        np.clip(tbx0 - 1, 0, w - 1),
+                        np.clip(h - tby1 - 1, 0, h - 1),
+                        np.clip(tbx1 + 1, 0, w - 1),
+                        np.clip(h - tby0 + 1, 0, h - 1),
+                    )
+                    w_tolerance = 0.2 * tb.width
+                    if (
+                        y0 <= tby0 + lh / 2 and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
+                    ) and (
+                        tbx0 <= x0 <= tbx0 + w_tolerance  # block 左边界比检测框小 20%
+                        or tbx1 - w_tolerance <= x1 <= tbx1  # block 右边界比检测框宽大 20%
+                    ):
+                        d.xyxy[0] = min(x0, tbx0)
+                        d.xyxy[2] = max(x1, tbx1)
+            cb()
 
     for box, page, yolo_res in zip(boxes, pdf_pages, yolo_results, strict=True):
         if cancellation_event and cancellation_event.is_set():
@@ -290,7 +324,7 @@ def translate_stream(
     workers: int = 1,
     vfont: str = "",
     vchar: str = "",
-    callback: object = None,
+    callback: Callable[[PDFTranslateStage, tqdm.tqdm], Any] | None = None,
     cancellation_event: asyncio.Event = None,
     envs: dict = None,
     prompt: Template = None,
@@ -362,12 +396,12 @@ def translate_stream(
 
     obj_patches = []
 
-    with tqdm.tqdm(total=total_pages) as progress:
+    with tqdm.tqdm(total=total_pages, desc=PDFTranslateStage.TRANSLATION) as progress:
 
         def cb(*args, **kwargs):
             progress.update(1)
             if callback:
-                callback(progress)
+                callback(PDFTranslateStage.TRANSLATION, progress)
 
         with mp.Pool(workers) as pool:
             async_results: list[AsyncResult] = []
@@ -495,7 +529,7 @@ def translate(
     workers: int = 1,
     vfont: str = "",
     vchar: str = "",
-    callback: object = None,
+    callback: Callable[[PDFTranslateStage, tqdm.tqdm], Any] | None = None,
     compatible: bool = False,
     cancellation_event: asyncio.Event = None,
     envs: dict = None,
@@ -533,9 +567,7 @@ def translate(
                 else:
                     r.raise_for_status()
             except Exception as e:
-                raise PDFValueError(
-                    f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}"
-                )
+                raise PDFValueError(f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}")
         filename = os.path.splitext(os.path.basename(file))[0]
 
         # If the commandline has specified converting to PDF/A format

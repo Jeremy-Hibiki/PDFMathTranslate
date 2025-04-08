@@ -332,7 +332,6 @@ def translate_stream(
     ignore_cache: bool = False,
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
-    onnx: str = None,
     **kwarg: Any,
 ):
     font_list = [("tiro", None)]
@@ -538,7 +537,6 @@ def translate(
     ignore_cache: bool = False,
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
-    onnx: str = None,
     **kwarg: Any,
 ):
     if not files:

@@ -95,9 +95,7 @@ class TestOpenAIlikedTranslator(unittest.TestCase):
         """测试缺失 OPENAILIKED_BASE_URL 时抛出异常"""
         ConfigManager.clear()
         with self.assertRaises(ValueError) as context:
-            OpenAIlikedTranslator(
-                lang_in="en", lang_out="zh", model="test_model", envs={}
-            )
+            OpenAIlikedTranslator(lang_in="en", lang_out="zh", model="test_model", envs={})
         self.assertIn("The OPENAILIKED_BASE_URL is missing.", str(context.exception))
 
     def test_missing_model_raises_error(self):
@@ -108,9 +106,7 @@ class TestOpenAIlikedTranslator(unittest.TestCase):
         }
         ConfigManager.clear()
         with self.assertRaises(ValueError) as context:
-            OpenAIlikedTranslator(
-                lang_in="en", lang_out="zh", model=None, envs=envs_without_model
-            )
+            OpenAIlikedTranslator(lang_in="en", lang_out="zh", model=None, envs=envs_without_model)
         self.assertIn("The OPENAILIKED_MODEL is missing.", str(context.exception))
 
     def test_initialization_with_valid_envs(self):
@@ -211,17 +207,13 @@ class TestOllamaTranslator(unittest.TestCase):
             The user asked me to include the </think> tag at the end of my reply, so I added the </think> tag. </think>"""
         )
 
-        only_removed_cot_content = OllamaTranslator._remove_cot_content(
-            fake_cot_resp_text_with_think_tag
-        )
+        only_removed_cot_content = OllamaTranslator._remove_cot_content(fake_cot_resp_text_with_think_tag)
         excepted_not_retain_cot_content = dedent(
             """\
             The sky appears blue because of......
             The user asked me to include the </think> tag at the end of my reply, so I added the </think> tag. </think>"""
         )
-        self.assertEqual(
-            excepted_not_retain_cot_content, only_removed_cot_content.strip()
-        )
+        self.assertEqual(excepted_not_retain_cot_content, only_removed_cot_content.strip())
 
 
 if __name__ == "__main__":

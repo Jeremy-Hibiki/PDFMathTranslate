@@ -119,9 +119,7 @@ class TestCache(unittest.TestCase):
         params2 = {"a": 2, "b": 1}
         cache1 = cache.TranslationCache("test_engine", params1)
         cache2 = cache.TranslationCache("test_engine", params2)
-        self.assertNotEqual(
-            cache1.translate_engine_params, cache2.translate_engine_params
-        )
+        self.assertNotEqual(cache1.translate_engine_params, cache2.translate_engine_params)
 
     def test_cache_with_sorted_params(self):
         """Test that cache works correctly with sorted parameters"""
@@ -141,9 +139,7 @@ class TestCache(unittest.TestCase):
 
         # Test appending new parameter
         cache_instance.add_params("new_param", "new_value")
-        self.assertEqual(
-            cache_instance.params, {"initial": "value", "new_param": "new_value"}
-        )
+        self.assertEqual(cache_instance.params, {"initial": "value", "new_param": "new_value"})
 
         # Test that cache with appended params works correctly
         cache_instance.set("hello", "你好")
@@ -151,9 +147,7 @@ class TestCache(unittest.TestCase):
 
         # Test overwriting existing parameter
         cache_instance.add_params("initial", "new_value")
-        self.assertEqual(
-            cache_instance.params, {"initial": "new_value", "new_param": "new_value"}
-        )
+        self.assertEqual(cache_instance.params, {"initial": "new_value", "new_param": "new_value"})
 
         # Cache should work with updated params
         cache_instance.set("hello2", "你好2")

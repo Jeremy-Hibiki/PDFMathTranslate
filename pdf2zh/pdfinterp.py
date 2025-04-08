@@ -54,9 +54,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
     Reference: PDF Reference, Appendix A, Operator Summary
     """
 
-    def __init__(
-        self, rsrcmgr: PDFResourceManager, device: PDFDevice, obj_patch
-    ) -> None:
+    def __init__(self, rsrcmgr: PDFResourceManager, device: PDFDevice, obj_patch) -> None:
         self.rsrcmgr = rsrcmgr
         self.device = device
         self.obj_patch = obj_patch
@@ -123,8 +121,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             len(self.curpath) == 2
             and self.curpath[0][0] == "m"
             and self.curpath[1][0] == "l"
-            and apply_matrix_pt(self.ctm, self.curpath[0][-2:])[1]
-            == apply_matrix_pt(self.ctm, self.curpath[1][-2:])[1]
+            and apply_matrix_pt(self.ctm, self.curpath[0][-2:])[1] == apply_matrix_pt(self.ctm, self.curpath[1][-2:])[1]
             and is_black(self.graphicstate.scolor)
         ):  # 独立直线，水平，黑色
             # print(apply_matrix_pt(self.ctm,self.curpath[0][-2:]),apply_matrix_pt(self.ctm,self.curpath[1][-2:]),self.graphicstate.scolor)
@@ -238,9 +235,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                     pos_inv = -np.mat(ctm[4:]) * ctm_inv
                 a, b, c, d = ctm_inv.reshape(4).tolist()
                 e, f = pos_inv.tolist()[0]
-                self.obj_patch[self.xobjmap[xobjid].objid] = (
-                    f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm {ops_new}"
-                )
+                self.obj_patch[self.xobjmap[xobjid].objid] = f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm {ops_new}"
             except Exception:
                 pass
         elif subtype is LITERAL_IMAGE and "Width" in xobj and "Height" in xobj:
@@ -326,18 +321,10 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                         if len(args) == nargs:
                             func(*args)
                             if not (
-                                name[0] == "T"
-                                or name in ['"', "'", "EI", "MP", "DP", "BMC", "BDC"]
+                                name[0] == "T" or name in ['"', "'", "EI", "MP", "DP", "BMC", "BDC"]
                             ):  # 过滤 T 系列文字指令，因为 EI 的参数是 obj 所以也需要过滤（只在少数文档中画横线时使用），过滤 marked 系列指令
                                 p = " ".join(
-                                    [
-                                        (
-                                            f"{x:f}"
-                                            if isinstance(x, float)
-                                            else str(x).replace("'", "")
-                                        )
-                                        for x in args
-                                    ]
+                                    [(f"{x:f}" if isinstance(x, float) else str(x).replace("'", "")) for x in args]
                                 )
                                 ops += f"{p} {name} "
                     else:
@@ -347,14 +334,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                             targs = []
                         if not (name[0] == "T" or name in ["BI", "ID", "EMC"]):
                             p = " ".join(
-                                [
-                                    (
-                                        f"{x:f}"
-                                        if isinstance(x, float)
-                                        else str(x).replace("'", "")
-                                    )
-                                    for x in targs
-                                ]
+                                [(f"{x:f}" if isinstance(x, float) else str(x).replace("'", "")) for x in targs]
                             )
                             ops += f"{p} {name} "
                 elif settings.STRICT:

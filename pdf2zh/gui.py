@@ -119,11 +119,7 @@ enabled_services: T.Optional[T.List[str]] = ConfigManager.get("ENABLED_SERVICES"
 if isinstance(enabled_services, list):
     default_services = ["Google", "Bing"]
     enabled_services_names = [str(_).lower().strip() for _ in enabled_services]
-    enabled_services = [
-        k
-        for k in service_map.keys()
-        if str(k).lower().strip() in enabled_services_names
-    ]
+    enabled_services = [k for k in service_map.keys() if str(k).lower().strip() in enabled_services_names]
     if len(enabled_services) == 0:
         raise RuntimeError(f"No services available.")
     enabled_services = default_services + enabled_services
@@ -293,9 +289,7 @@ def translate_file(
     for k, v in _envs.items():
         if str(k).upper().endswith("API_KEY") and str(v) == "***":
             # Load Real API_KEYs from local configure file
-            real_keys: str = ConfigManager.get_env_by_translatername(
-                translator, k, None
-            )
+            real_keys: str = ConfigManager.get_env_by_translatername(translator, k, None)
             _envs[k] = real_keys
 
     print(f"Files before translation: {os.listdir(output)}")
@@ -559,15 +553,11 @@ cancellation_event_map = {}
 # The following code creates the GUI
 with gr.Blocks(
     title="PDFMathTranslate - PDF Translation with preserved formats",
-    theme=gr.themes.Default(
-        primary_hue=custom_blue, spacing_size="md", radius_size="lg"
-    ),
+    theme=gr.themes.Default(primary_hue=custom_blue, spacing_size="md", radius_size="lg"),
     css=custom_css,
     head=demo_recaptcha if flag_demo else "",
 ) as demo:
-    gr.Markdown(
-        "# [PDFMathTranslate @ GitHub](https://github.com/Byaidu/PDFMathTranslate)"
-    )
+    gr.Markdown("# [PDFMathTranslate @ GitHub](https://github.com/Byaidu/PDFMathTranslate)")
 
     with gr.Row():
         with gr.Column(scale=1):
@@ -628,21 +618,11 @@ with gr.Blocks(
 
             with gr.Accordion("Open for More Experimental Options!", open=False):
                 gr.Markdown("#### Experimental")
-                threads = gr.Textbox(
-                    label="number of threads", interactive=True, value="4"
-                )
-                skip_subset_fonts = gr.Checkbox(
-                    label="Skip font subsetting", interactive=True, value=False
-                )
-                ignore_cache = gr.Checkbox(
-                    label="Ignore cache", interactive=True, value=False
-                )
-                prompt = gr.Textbox(
-                    label="Custom Prompt for llm", interactive=True, visible=False
-                )
-                use_babeldoc = gr.Checkbox(
-                    label="Use BabelDOC", interactive=True, value=False
-                )
+                threads = gr.Textbox(label="number of threads", interactive=True, value="4")
+                skip_subset_fonts = gr.Checkbox(label="Skip font subsetting", interactive=True, value=False)
+                ignore_cache = gr.Checkbox(label="Ignore cache", interactive=True, value=False)
+                prompt = gr.Textbox(label="Custom Prompt for llm", interactive=True, visible=False)
+                use_babeldoc = gr.Checkbox(label="Use BabelDOC", interactive=True, value=False)
                 envs.append(prompt)
 
             def on_select_service(service, evt: gr.EventData):
@@ -652,16 +632,10 @@ with gr.Blocks(
                     _envs.append(gr.update(visible=False, value=""))
                 for i, env in enumerate(translator.envs.items()):
                     label = env[0]
-                    value = ConfigManager.get_env_by_translatername(
-                        translator, env[0], env[1]
-                    )
+                    value = ConfigManager.get_env_by_translatername(translator, env[0], env[1])
                     visible = True
                     if hidden_gradio_details:
-                        if (
-                            "MODEL" not in str(label).upper()
-                            and value
-                            and hidden_gradio_details
-                        ):
+                        if "MODEL" not in str(label).upper() and value and hidden_gradio_details:
                             visible = False
                         # Hidden Keys From Gradio
                         if "API_KEY" in label.upper():
@@ -687,15 +661,9 @@ with gr.Blocks(
                     return gr.update(visible=False)
 
             output_title = gr.Markdown("## Translated", visible=False)
-            output_file_mono = gr.File(
-                label="Download Translation (Mono)", visible=False
-            )
-            output_file_dual = gr.File(
-                label="Download Translation (Dual)", visible=False
-            )
-            recaptcha_response = gr.Textbox(
-                label="reCAPTCHA Response", elem_id="verify", visible=False
-            )
+            output_file_mono = gr.File(label="Download Translation (Mono)", visible=False)
+            output_file_dual = gr.File(label="Download Translation (Dual)", visible=False)
+            recaptcha_response = gr.Textbox(label="reCAPTCHA Response", elem_id="verify", visible=False)
             recaptcha_box = gr.HTML('<div id="recaptcha-box"></div>')
             translate_btn = gr.Button("Translate", variant="primary")
             cancellation_btn = gr.Button("Cancel", variant="secondary")
@@ -816,17 +784,13 @@ def parse_user_passwd(file_path: str) -> tuple:
             print(f"Error: File '{file_path[1]}' not found.")
     try:
         with open(file_path[0], "r", encoding="utf-8") as file:
-            tuple_list = [
-                tuple(line.strip().split(",")) for line in file if line.strip()
-            ]
+            tuple_list = [tuple(line.strip().split(",")) for line in file if line.strip()]
     except FileNotFoundError:
         print(f"Error: File '{file_path[0]}' not found.")
     return tuple_list, content
 
 
-def setup_gui(
-    share: bool = False, auth_file: list = ["", ""], server_port=7860
-) -> None:
+def setup_gui(share: bool = False, auth_file: list = ["", ""], server_port=7860) -> None:
     """
     Setup the GUI with the given parameters.
 
@@ -851,9 +815,7 @@ def setup_gui(
                     server_port=server_port,
                 )
             except Exception:
-                print(
-                    "Error launching GUI using 0.0.0.0.\nThis may be caused by global mode of proxy software."
-                )
+                print("Error launching GUI using 0.0.0.0.\nThis may be caused by global mode of proxy software.")
                 try:
                     demo.launch(
                         server_name="127.0.0.1",
@@ -863,12 +825,8 @@ def setup_gui(
                         server_port=server_port,
                     )
                 except Exception:
-                    print(
-                        "Error launching GUI using 127.0.0.1.\nThis may be caused by global mode of proxy software."
-                    )
-                    demo.launch(
-                        debug=True, inbrowser=True, share=True, server_port=server_port
-                    )
+                    print("Error launching GUI using 127.0.0.1.\nThis may be caused by global mode of proxy software.")
+                    demo.launch(debug=True, inbrowser=True, share=True, server_port=server_port)
         else:
             try:
                 demo.launch(
@@ -881,9 +839,7 @@ def setup_gui(
                     server_port=server_port,
                 )
             except Exception:
-                print(
-                    "Error launching GUI using 0.0.0.0.\nThis may be caused by global mode of proxy software."
-                )
+                print("Error launching GUI using 0.0.0.0.\nThis may be caused by global mode of proxy software.")
                 try:
                     demo.launch(
                         server_name="127.0.0.1",
@@ -895,9 +851,7 @@ def setup_gui(
                         server_port=server_port,
                     )
                 except Exception:
-                    print(
-                        "Error launching GUI using 127.0.0.1.\nThis may be caused by global mode of proxy software."
-                    )
+                    print("Error launching GUI using 127.0.0.1.\nThis may be caused by global mode of proxy software.")
                     demo.launch(
                         debug=True,
                         inbrowser=True,

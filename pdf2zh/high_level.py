@@ -102,7 +102,7 @@ def doclayout_patch(
     cancellation_event: asyncio.Event = None,
     callback: Callable[[PDFTranslateStage, tqdm.tqdm], Any] | None = None,
     **kwarg: Any,
-):
+) -> tuple[dict[int, np.ndarray], list[PDFPage], Document | None]:
     doc_debug = None
     if logger.isEnabledFor(logging.DEBUG):
         doc_debug = Document(stream=doc_zh.tobytes())
@@ -187,7 +187,8 @@ def doclayout_patch(
                     )
                     w_tolerance = 0.2 * tb.width
                     if (
-                        y0 <= tby0 + lh / 2 and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
+                        y0 <= tby0 + lh / 2
+                        and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
                     ) and (
                         tbx0 <= x0 <= tbx0 + w_tolerance  # block 左边界比检测框小 20%
                         or tbx1 - w_tolerance <= x1 <= tbx1  # block 右边界比检测框宽大 20%
@@ -264,7 +265,7 @@ def translate_patch(
     thread: int = 0,
     lang_in: str = "",
     lang_out: str = "",
-    service: str = "",
+    service: list[str] | str = "",
     noto_name: str = "",
     font_path: str = "",
     cancellation_event: asyncio.Event = None,
@@ -274,7 +275,7 @@ def translate_patch(
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
-) -> dict:
+) -> dict[str, str]:
     iter_pages = PDFPage.create_pages(PDFDocument(PDFParser(fp)))
     current_idx = 0
     pdf_page = None
@@ -319,7 +320,7 @@ def translate_stream(
     pages: list[int] | None = None,
     lang_in: str = "",
     lang_out: str = "",
-    service: str = "",
+    service: list[str] | str = "",
     thread: int = 0,
     workers: int = 1,
     vfont: str = "",
@@ -333,7 +334,7 @@ def translate_stream(
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
-):
+) -> tuple[bytes, bytes, bytes | None]:
     font_list = [("tiro", None)]
 
     font_path = download_remote_fonts(lang_out.lower())
@@ -468,7 +469,7 @@ def translate_stream(
     )
 
 
-def convert_to_pdfa(input_path, output_path):
+def convert_to_pdfa(input_path: str, output_path: str) -> None:
     """
     Convert PDF to PDF/A format
 
@@ -538,7 +539,7 @@ def translate(
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
-):
+) -> list[tuple[str, str]]:
     if not files:
         raise PDFValueError("No files to process.")
 
@@ -565,7 +566,9 @@ def translate(
                 else:
                     r.raise_for_status()
             except Exception as e:
-                raise PDFValueError(f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}")
+                raise PDFValueError(
+                    f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}"
+                )
         filename = os.path.splitext(os.path.basename(file))[0]
 
         # If the commandline has specified converting to PDF/A format
@@ -612,7 +615,7 @@ def translate(
     return result_files
 
 
-def download_remote_fonts(lang: str):
+def download_remote_fonts(lang: str) -> str:
     lang = lang.lower()
     LANG_NAME_MAP = {
         **{la: "GoNotoKurrent-Regular.ttf" for la in noto_list},

@@ -1,48 +1,46 @@
 import asyncio
 import cgi
+import logging
 import os
 import shutil
-from tracemalloc import Snapshot
 import uuid
 from asyncio import CancelledError
 from pathlib import Path
-import typing as T
+from string import Template
 
 import gradio as gr
 import requests
 import tqdm
 from gradio_pdf import PDF
-from string import Template
-import logging
 
 from pdf2zh import __version__
-from pdf2zh.high_level import translate
-from pdf2zh.doclayout import ModelInstance
 from pdf2zh.config import ConfigManager
+from pdf2zh.doclayout import ModelInstance
+from pdf2zh.high_level import translate
 from pdf2zh.translator import (
     AnythingLLMTranslator,
+    ArgosTranslator,
     AzureOpenAITranslator,
     AzureTranslator,
     BaseTranslator,
     BingTranslator,
     DeepLTranslator,
     DeepLXTranslator,
+    DeepseekTranslator,
     DifyTranslator,
-    ArgosTranslator,
     GeminiTranslator,
     GoogleTranslator,
+    GrokTranslator,
+    GroqTranslator,
     ModelScopeTranslator,
     OllamaTranslator,
+    OpenAIlikedTranslator,
     OpenAITranslator,
+    QwenMtTranslator,
     SiliconTranslator,
     TencentTranslator,
     XinferenceTranslator,
     ZhipuTranslator,
-    GrokTranslator,
-    GroqTranslator,
-    DeepseekTranslator,
-    OpenAIlikedTranslator,
-    QwenMtTranslator,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,13 +113,13 @@ if ConfigManager.get("PDF2ZH_DEMO"):
 
 
 # Limit Enabled Services
-enabled_services: T.Optional[T.List[str]] = ConfigManager.get("ENABLED_SERVICES")
+enabled_services: list[str] | None = ConfigManager.get("ENABLED_SERVICES")
 if isinstance(enabled_services, list):
     default_services = ["Google", "Bing"]
     enabled_services_names = [str(_).lower().strip() for _ in enabled_services]
     enabled_services = [k for k in service_map.keys() if str(k).lower().strip() in enabled_services_names]
     if len(enabled_services) == 0:
-        raise RuntimeError(f"No services available.")
+        raise RuntimeError("No services available.")
     enabled_services = default_services + enabled_services
 else:
     enabled_services = list(service_map.keys())
@@ -289,7 +287,7 @@ def translate_file(
     for k, v in _envs.items():
         if str(k).upper().endswith("API_KEY") and str(v) == "***":
             # Load Real API_KEYs from local configure file
-            real_keys: str = ConfigManager.get_env_by_translatername(translator, k, None)
+            real_keys: str = ConfigManager.get_env_by_translator_name(translator, k, None)
             _envs[k] = real_keys
 
     print(f"Files before translation: {os.listdir(output)}")
@@ -359,33 +357,25 @@ def babeldoc_translate_file(**kwargs):
         prompt = None
 
     from pdf2zh.translator import (
-        AzureOpenAITranslator,
-        OpenAITranslator,
-        ZhipuTranslator,
-        ModelScopeTranslator,
-        SiliconTranslator,
-        GeminiTranslator,
-        AzureTranslator,
-        TencentTranslator,
-        DifyTranslator,
-        DeepLXTranslator,
-        OllamaTranslator,
-        OpenAITranslator,
-        ZhipuTranslator,
-        ModelScopeTranslator,
-        SiliconTranslator,
-        GeminiTranslator,
-        AzureTranslator,
-        TencentTranslator,
-        DifyTranslator,
         AnythingLLMTranslator,
-        XinferenceTranslator,
         ArgosTranslator,
+        AzureOpenAITranslator,
+        AzureTranslator,
+        DeepLXTranslator,
+        DeepseekTranslator,
+        DifyTranslator,
+        GeminiTranslator,
         GrokTranslator,
         GroqTranslator,
-        DeepseekTranslator,
+        ModelScopeTranslator,
+        OllamaTranslator,
         OpenAIlikedTranslator,
+        OpenAITranslator,
         QwenMtTranslator,
+        SiliconTranslator,
+        TencentTranslator,
+        XinferenceTranslator,
+        ZhipuTranslator,
     )
 
     for translator in [
@@ -425,6 +415,7 @@ def babeldoc_translate_file(**kwargs):
     else:
         raise ValueError("Unsupported translation service")
     import asyncio
+
     from babeldoc.main import create_progress_handler
 
     for file in kwargs["files"]:
@@ -432,7 +423,7 @@ def babeldoc_translate_file(**kwargs):
         yadt_config = YadtConfig(
             input_file=file,
             font=None,
-            pages=",".join((str(x) for x in getattr(kwargs, "raw_pages", []))),
+            pages=",".join(str(x) for x in getattr(kwargs, "raw_pages", [])),
             output_dir=kwargs["output"],
             doc_layout_model=BABELDOC_MODEL,
             translator=translator,
@@ -632,7 +623,7 @@ with gr.Blocks(
                     _envs.append(gr.update(visible=False, value=""))
                 for i, env in enumerate(translator.envs.items()):
                     label = env[0]
-                    value = ConfigManager.get_env_by_translatername(translator, env[0], env[1])
+                    value = ConfigManager.get_env_by_translator_name(translator, env[0], env[1])
                     visible = True
                     if hidden_gradio_details:
                         if "MODEL" not in str(label).upper() and value and hidden_gradio_details:
@@ -778,12 +769,12 @@ def parse_user_passwd(file_path: str) -> tuple:
         return tuple_list, content
     if len(file_path) == 2:
         try:
-            with open(file_path[1], "r", encoding="utf-8") as file:
+            with open(file_path[1], encoding="utf-8") as file:
                 content = file.read()
         except FileNotFoundError:
             print(f"Error: File '{file_path[1]}' not found.")
     try:
-        with open(file_path[0], "r", encoding="utf-8") as file:
+        with open(file_path[0], encoding="utf-8") as file:
             tuple_list = [tuple(line.strip().split(",")) for line in file if line.strip()]
     except FileNotFoundError:
         print(f"Error: File '{file_path[0]}' not found.")

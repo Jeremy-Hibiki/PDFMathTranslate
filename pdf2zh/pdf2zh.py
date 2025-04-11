@@ -263,7 +263,7 @@ def main(args: list[str] | None = None) -> int:
     parsed_args = parse_args(args)
 
     if parsed_args.config:
-        ConfigManager.custome_config(parsed_args.config)
+        ConfigManager.custom_config(parsed_args.config)
 
     if parsed_args.debug:
         log.setLevel(logging.DEBUG)

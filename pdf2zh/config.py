@@ -1,13 +1,14 @@
-import json
-from pathlib import Path
-from threading import RLock  # 改成 RLock
-import os
 import copy
+import json
+import os
+from pathlib import Path
+from threading import RLock
+from typing import Any, ClassVar, Self
 
 
 class ConfigManager:
-    _instance = None
-    _lock = RLock()  # 用 RLock 替换 Lock，允许在同一个线程中重复获取锁
+    _instance: ClassVar[Self] = None
+    _lock: ClassVar[RLock] = RLock()  # 用 RLock 替换 Lock，允许在同一个线程中重复获取锁
 
     @classmethod
     def get_instance(cls):
@@ -59,7 +60,7 @@ class ConfigManager:
             with self._config_path.open("w", encoding="utf-8") as f:
                 json.dump(cleaned_data, f, indent=4, ensure_ascii=False)
 
-    def _remove_circular_references(self, obj, seen=None):
+    def _remove_circular_references(self, obj: Any, seen: set | None = None) -> Any | None:
         """递归移除循环引用"""
         if seen is None:
             seen = set()
@@ -75,7 +76,7 @@ class ConfigManager:
         return obj
 
     @classmethod
-    def custome_config(cls, file_path):
+    def custom_config(cls, file_path: str | Path) -> None:
         """使用自定义路径加载配置文件"""
         custom_path = Path(file_path)
         if not custom_path.exists():
@@ -89,7 +90,7 @@ class ConfigManager:
             cls._instance = instance
 
     @classmethod
-    def get(cls, key, default=None):
+    def get(cls, key: str, default: Any = None) -> Any:
         """获取配置值"""
         instance = cls.get_instance()
         # 读取时，加锁或不加锁都行。但为了统一，我们在修改配置前后都要加锁。
@@ -115,7 +116,7 @@ class ConfigManager:
         return default
 
     @classmethod
-    def set(cls, key, value):
+    def set(cls, key: str, value: Any) -> None:
         """设置配置值并保存"""
         instance = cls.get_instance()
         with instance._lock:
@@ -123,7 +124,7 @@ class ConfigManager:
             instance._save_config()
 
     @classmethod
-    def get_translator_by_name(cls, name):
+    def get_translator_by_name(cls, name: str) -> dict[str, Any] | None:
         """根据 name 获取对应的 translator 配置"""
         instance = cls.get_instance()
         translators = instance._config_data.get("translators", [])
@@ -133,7 +134,7 @@ class ConfigManager:
         return None
 
     @classmethod
-    def set_translator_by_name(cls, name, new_translator_envs):
+    def set_translator_by_name(cls, name: str, new_translator_envs: dict[str, Any]) -> None:
         """根据 name 设置或更新 translator 配置"""
         instance = cls.get_instance()
         with instance._lock:
@@ -148,12 +149,12 @@ class ConfigManager:
             instance._save_config()
 
     @classmethod
-    def get_env_by_translatername(cls, translater_name, name, default=None):
+    def get_env_by_translator_name(cls, translator_name: str, name: str, default: Any = None) -> Any:
         """根据 name 获取对应的 translator 配置"""
         instance = cls.get_instance()
         translators = instance._config_data.get("translators", [])
         for translator in translators:
-            if translator.get("name") == translater_name.name:
+            if translator.get("name") == translator_name.name:
                 if translator["envs"][name]:
                     return translator["envs"][name]
                 else:
@@ -165,14 +166,14 @@ class ConfigManager:
         with instance._lock:
             translators = instance._config_data.get("translators", [])
             for translator in translators:
-                if translator.get("name") == translater_name.name:
+                if translator.get("name") == translator_name.name:
                     translator["envs"][name] = default
                     instance._save_config()
                     return default
             translators.append(
                 {
-                    "name": translater_name.name,
-                    "envs": copy.deepcopy(translater_name.envs),
+                    "name": translator_name.name,
+                    "envs": copy.deepcopy(translator_name.envs),
                 }
             )
             instance._config_data["translators"] = translators
@@ -180,7 +181,7 @@ class ConfigManager:
             return default
 
     @classmethod
-    def delete(cls, key):
+    def delete(cls, key: str) -> None:
         """删除配置值并保存"""
         instance = cls.get_instance()
         with instance._lock:
@@ -189,7 +190,7 @@ class ConfigManager:
                 instance._save_config()
 
     @classmethod
-    def clear(cls):
+    def clear(cls) -> None:
         """删除配置值并保存"""
         instance = cls.get_instance()
         with instance._lock:
@@ -197,14 +198,14 @@ class ConfigManager:
             instance._save_config()
 
     @classmethod
-    def all(cls):
+    def all(cls) -> dict[str, Any]:
         """返回所有配置项"""
         instance = cls.get_instance()
         # 这里只做读取操作，一般可不加锁。不过为了保险也可以加锁。
         return instance._config_data
 
     @classmethod
-    def remove(cls):
+    def remove(cls) -> None:
         instance = cls.get_instance()
         with instance._lock:
             os.remove(instance._config_path)

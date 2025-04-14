@@ -392,6 +392,7 @@ def translate_stream(
         doc_zh,
         pages,
         cancellation_event,
+        callback,
     )
 
     obj_patches = []

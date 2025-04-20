@@ -9,6 +9,7 @@ import sys
 import tempfile
 from asyncio import CancelledError
 from collections.abc import Callable
+from copy import deepcopy
 from enum import StrEnum
 from multiprocessing.pool import ApplyResult
 from multiprocessing.pool import ThreadPool as Pool
@@ -394,7 +395,7 @@ def translate_stream(
             async_results: list[ApplyResult] = []
             for arg in [
                 (
-                    fp,
+                    deepcopy(fp),
                     p.pageno,
                     p.page_xref,
                     layout[p.pageno],

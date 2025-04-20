@@ -595,7 +595,7 @@ class OpType(Enum):
 
 _T = TypeVar("_T")
 
-def asyncio_run(coro: Coroutine[_T, Any, _T]) -> _T:
+def asyncio_run(coro: Coroutine[Any, Any, _T]) -> _T:
     """Gets an existing event loop to run the coroutine.
 
     If there is no existing event loop, creates a new one.
@@ -614,4 +614,4 @@ def asyncio_run(coro: Coroutine[_T, Any, _T]) -> _T:
         except RuntimeError:
             raise RuntimeError(
                 "Detected nested async. Please use nest_asyncio.apply() to allow nested event loops."
-            )
+            ) from None

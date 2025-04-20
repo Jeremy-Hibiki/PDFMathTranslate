@@ -3,7 +3,6 @@
 import asyncio
 import io
 import logging
-import multiprocessing as mp
 import os
 import re
 import sys
@@ -11,7 +10,7 @@ import tempfile
 from asyncio import CancelledError
 from collections.abc import Callable
 from enum import StrEnum
-from multiprocessing.pool import AsyncResult
+from multiprocessing.pool import ApplyResult, Pool
 from pathlib import Path
 from string import Template
 from typing import Any, BinaryIO, Literal
@@ -82,7 +81,6 @@ colors = (
 
 
 class PDFTranslateStage(StrEnum):
-    PAGES_TO_IMAGES = "Pages to Images"
     LAYOUT_DETECTION = "Layout Detection"
     LAYOUT_CALIBRATION = "Layout Calibration"
     TRANSLATION = "Translation"
@@ -117,26 +115,17 @@ def doclayout_patch(
     boxes: list[np.ndarray] = []
     images: list[np.ndarray] = []
 
-    with tqdm.tqdm(total=len(pages), desc=PDFTranslateStage.PAGES_TO_IMAGES) as progress:
-
-        def cb():
-            nonlocal progress, callback
-            progress.update(1)
-            if callback:
-                callback(PDFTranslateStage.PAGES_TO_IMAGES, progress)
-
-        for pageno, page in enumerate(PDFPage.create_pages(doc)):
-            if cancellation_event and cancellation_event.is_set():
-                raise CancelledError("task cancelled")
-            if pages and (pageno not in pages):
-                continue
-            page.pageno = pageno
-            pdf_pages.append(page)
-            pix = doc_zh[page.pageno].get_pixmap()
-            image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
-            images.append(image)
-            boxes.append(np.ones((pix.height, pix.width)))
-            cb()
+    for pageno, page in enumerate(PDFPage.create_pages(doc)):
+        if cancellation_event and cancellation_event.is_set():
+            raise CancelledError("task cancelled")
+        if pages and (pageno not in pages):
+            continue
+        page.pageno = pageno
+        pdf_pages.append(page)
+        pix = doc_zh[page.pageno].get_pixmap()
+        image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[:, :, ::-1]
+        images.append(image)
+        boxes.append(np.ones((pix.height, pix.width)))
 
     yolo_results: list[YoloResult] = []
     with tqdm.tqdm(total=len(images), desc=PDFTranslateStage.LAYOUT_DETECTION) as progress:
@@ -275,7 +264,7 @@ def translate_patch(
     max_retries: int = 10,
     error: Literal["raise", "source", "drop"] = "source",
     **kwarg: Any,
-) -> dict[str, str]:
+) -> dict[int, str]:
     iter_pages = PDFPage.create_pages(PDFDocument(PDFParser(fp)))
     current_idx = 0
     pdf_page = None
@@ -287,7 +276,9 @@ def translate_patch(
     pdf_page.pageno = pageno
 
     rsrcmgr = PDFResourceManager()
-    device = TranslateConverter(
+
+    obj_patch: dict[int, str] = {}
+    with TranslateConverter(
         rsrcmgr,
         vfont,
         vchar,
@@ -303,15 +294,9 @@ def translate_patch(
         ignore_cache,
         max_retries=max_retries,
         error=error,
-    )
-
-    assert device is not None
-    obj_patch = {}
-    interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch)
-
-    interpreter.process_page(pdf_page)
-
-    device.close()
+    ) as device:
+        interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch)
+        interpreter.process_page(pdf_page)
     return obj_patch
 
 
@@ -395,7 +380,7 @@ def translate_stream(
         callback,
     )
 
-    obj_patches = []
+    obj_patches: list[dict[int, str]] = []
 
     with tqdm.tqdm(total=total_pages, desc=PDFTranslateStage.TRANSLATION) as progress:
 
@@ -404,8 +389,8 @@ def translate_stream(
             if callback:
                 callback(PDFTranslateStage.TRANSLATION, progress)
 
-        with mp.Pool(workers) as pool:
-            async_results: list[AsyncResult] = []
+        with Pool(workers) as pool:
+            async_results: list[ApplyResult] = []
             for arg in [
                 (
                     fp,

@@ -140,14 +140,20 @@ class TranslateConverter(PDFConverterEx):
         # e.g. "ollama:gemma2:9b" -> ["ollama", "gemma2:9b"]
         service = [service] if isinstance(service, str) else service
         for service_name in service:
-            param = service_name.split(":")
-            service_name = param[0]
-            service_model = param[1] if len(param) > 1 else None
-            try:
-                service_weight = param[2] if len(param) > 2 else 1
-                service_weight = int(service_weight)
-            except ValueError:
-                service_weight = 1
+            splits = service_name.split(":", 1)
+            service_name = splits[0]
+            service_model = splits[1] if len(splits) > 1 else None
+            service_weight = 1
+            if service_model:
+                try:
+                    splits = service_model.rsplit(":", 1)
+                    if len(splits) == 1:
+                        service_weight = 1
+                    else:
+                        service_weight = int(splits[1])
+                        service_model = splits[0]
+                except ValueError:
+                    service_weight = 1
             if not envs:
                 envs = {}
             translator = None

@@ -12,6 +12,17 @@ from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
 logger = logging.getLogger(__name__)
 
 
+retry_429 = retry(
+    retry=retry_if_exception_type(openai.RateLimitError),
+    stop=stop_after_attempt(10),
+    wait=wait_exponential(multiplier=1, min=1, max=15),
+    before_sleep=lambda retry_state: logger.warning(
+        f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
+        f"(Attempt {retry_state.attempt_number}/10)"
+    ),
+)
+
+
 @TranslatorRegistry.register()
 class OpenAITranslator(BaseTranslator):
     # https://github.com/openai/openai-python
@@ -63,6 +74,10 @@ class OpenAITranslator(BaseTranslator):
             base_url=base_url or self.envs["OPENAI_BASE_URL"],
             api_key=api_key or self.envs["OPENAI_API_KEY"],
         )
+        self.async_client = openai.AsyncOpenAI(
+            base_url=base_url or self.envs["OPENAI_BASE_URL"],
+            api_key=api_key or self.envs["OPENAI_API_KEY"],
+        )
         self.prompttext = prompt
         self.add_cache_impact_parameters("temperature", self.options["temperature"])
         self.add_cache_impact_parameters("prompt", self.prompt("", self.prompttext))
@@ -70,15 +85,7 @@ class OpenAITranslator(BaseTranslator):
         self.add_cache_impact_parameters("think_filter_regex", think_filter_regex)
         self.think_filter_regex = re.compile(think_filter_regex, flags=re.DOTALL)
 
-    @retry(
-        retry=retry_if_exception_type(openai.RateLimitError),
-        stop=stop_after_attempt(10),
-        wait=wait_exponential(multiplier=1, min=1, max=15),
-        before_sleep=lambda retry_state: logger.warning(
-            f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
-            f"(Attempt {retry_state.attempt_number}/10)"
-        ),
-    )
+    @retry_429
     def do_translate(self, text) -> str:
         messages = self.prompt(text, self.prompttext)
         try:
@@ -94,6 +101,37 @@ class OpenAITranslator(BaseTranslator):
             # Maybe the max_tokens is larger than the api accepts
             if re.findall(r"max[_ ]tokens", e.message, re.I):
                 response = self.client.chat.completions.create(
+                    model=self.model,
+                    **self.options,
+                    messages=messages,
+                )
+            else:
+                raise
+        if not response.choices:
+            if hasattr(response, "error"):
+                raise ValueError("Error response from Service", response.error)
+        if response.choices[0].finish_reason == "length":
+            raise ValueError("Response length limit exceeded")
+        content = response.choices[0].message.content.strip()
+        content = self.think_filter_regex.sub("", content).strip()
+        return content
+
+    @retry_429
+    async def ado_translate(self, text: str) -> str:
+        messages = self.prompt(text, self.prompttext)
+        try:
+            tokens = TokenizerManager.count_tokens(text)
+            max_tokens = int(max(20, tokens * 2))  # 短文本 Token 估算容易非常不准
+            response = await self.async_client.chat.completions.create(
+                model=self.model,
+                **self.options,
+                max_tokens=max_tokens,
+                messages=messages,
+            )
+        except openai.BadRequestError as e:
+            # Maybe the max_tokens is larger than the api accepts
+            if re.findall(r"max[_ ]tokens", e.message, re.I):
+                response = await self.async_client.chat.completions.create(
                     model=self.model,
                     **self.options,
                     messages=messages,

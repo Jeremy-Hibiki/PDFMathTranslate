@@ -125,6 +125,29 @@ class BaseTranslator:
         """
         raise NotImplementedError
 
+    async def atranslate(self, text: str, ignore_cache: bool = False) -> str:
+        """
+        Translate the text asynchronously, and the other part should call this method.
+        :param text: text to translate
+        :return: translated text
+        """
+        if not (self.ignore_cache or ignore_cache):
+            cache = self.cache.get(text)
+            if cache is not None:
+                return cache
+
+        translation = await self.ado_translate(text)
+        self.cache.set(text, translation)
+        return translation
+
+    async def ado_translate(self, text: str) -> str:
+        """
+        Actual translate text asynchronously, default implementation is to call do_translate synchronously
+        :param text: text to translate
+        :return: translated text
+        """
+        return self.do_translate(text)
+
     def prompt(self, text: str, prompt_template: Template | None = None) -> list[dict[str, str]]:
         try:
             return [

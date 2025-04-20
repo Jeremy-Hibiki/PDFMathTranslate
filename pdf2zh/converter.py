@@ -1,10 +1,12 @@
-import concurrent.futures
+import asyncio
 import logging
 import re
 import unicodedata
+from collections.abc import Coroutine
 from enum import Enum
 from string import Template
-from typing import Literal
+from typing import Any, Literal
+from typing_extensions import TypeVar
 
 import numpy as np
 from pdfminer.converter import PDFConverter
@@ -367,33 +369,35 @@ class TranslateConverter(PDFConverterEx):
         if len(sstk):
             log.debug("\n==========[SSTACK]==========\n")
 
-        def worker(s: str):  # 多线程翻译
-            @retry(
-                wait=wait_fixed(1),
-                stop=stop_after_attempt(self.max_retries),
-                reraise=True,
-            )
-            def runner():
-                if not s.strip() or re.match(r"^\{v\d+\}$", s):  # 空白和公式不翻译
-                    return s
-                it = iter(self.translators)
-                translator = next(it, None)
-                while translator:
-                    try:
-                        new = translator.translate(s)
-                        return re.sub(CONTROL_CHAR_PAT, "", new)
-                    except BaseException as e:
-                        if log.isEnabledFor(logging.DEBUG):
-                            log.exception(e)
-                        else:
-                            log.exception(e, exc_info=False)
-                        translator = next(it, None)
-                        if translator:
-                            log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
-                raise ValueError("All translation services failed") from None
+        semaphore = asyncio.Semaphore(self.thread)
+        @retry(
+            wait=wait_fixed(1),
+            stop=stop_after_attempt(self.max_retries),
+            reraise=True,
+        )
+        async def translate_runner(s: str):
+            if not s.strip() or re.match(r"^\{v\d+\}$", s):  # 空白和公式不翻译
+                return s
+            it = iter(self.translators)
+            translator = next(it, None)
+            while translator:
+                try:
+                    new = await translator.atranslate(s)
+                    return re.sub(CONTROL_CHAR_PAT, "", new)
+                except BaseException as e:
+                    if log.isEnabledFor(logging.DEBUG):
+                        log.exception(e)
+                    else:
+                        log.exception(e, exc_info=False)
+                    translator = next(it, None)
+                    if translator:
+                        log.info(f"Translation failed, try next translator: {translator.name} {translator.model}")
+            raise ValueError("All translation services failed") from None
 
+        async def worker(s: str):  # 多线程翻译
             try:
-                return runner()
+                async with semaphore:
+                    return await translate_runner(s)
             except Exception as e:
                 if self.error == "raise":
                     raise e
@@ -406,10 +410,10 @@ class TranslateConverter(PDFConverterEx):
                 else:
                     raise ValueError(f"Unknown error strategy: {self.error}") from e
 
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.thread
-        ) as executor:
-            news = list(executor.map(worker, sstk))
+        async def run():
+            tasks = [worker(s) for s in sstk]
+            return await asyncio.gather(*tasks)
+        news = asyncio_run(run())
 
         ############################################################
         # C. 新文档排版
@@ -587,3 +591,27 @@ class TranslateConverter(PDFConverterEx):
 class OpType(Enum):
     TEXT = "text"
     LINE = "line"
+
+
+_T = TypeVar("_T")
+
+def asyncio_run(coro: Coroutine[_T, Any, _T]) -> _T:
+    """Gets an existing event loop to run the coroutine.
+
+    If there is no existing event loop, creates a new one.
+    """
+    try:
+        # Check if there's an existing event loop
+        loop = asyncio.get_event_loop()
+
+        # If we're here, there's an existing loop but it's not running
+        return loop.run_until_complete(coro)
+
+    except RuntimeError:
+        # If we can't get the event loop, we're likely in a different thread, or its already running
+        try:
+            return asyncio.run(coro)
+        except RuntimeError:
+            raise RuntimeError(
+                "Detected nested async. Please use nest_asyncio.apply() to allow nested event loops."
+            )

@@ -10,7 +10,8 @@ import tempfile
 from asyncio import CancelledError
 from collections.abc import Callable
 from enum import StrEnum
-from multiprocessing.pool import ApplyResult, Pool
+from multiprocessing.pool import ApplyResult
+from multiprocessing.pool import ThreadPool as Pool
 from pathlib import Path
 from string import Template
 from typing import Any, BinaryIO, Literal

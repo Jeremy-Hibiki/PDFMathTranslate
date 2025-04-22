@@ -1,8 +1,6 @@
 import re
 from string import Template
 
-import ollama
-
 from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
 
 
@@ -25,6 +23,10 @@ class OllamaTranslator(BaseTranslator):
         prompt: Template | None = None,
         ignore_cache=False,
     ):
+        try:
+            import ollama
+        except ImportError:
+            raise ImportError("ollama is not installed") from None
         self.set_envs(envs)
         if not model:
             model = self.envs["OLLAMA_MODEL"]

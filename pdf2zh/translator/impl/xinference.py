@@ -1,7 +1,5 @@
 import logging
 
-import xinference_client
-
 from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
 
 logger = logging.getLogger(__name__)
@@ -18,6 +16,10 @@ class XinferenceTranslator(BaseTranslator):
     CustomPrompt = True
 
     def __init__(self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False):
+        try:
+            import xinference_client
+        except ImportError:
+            raise ImportError("xinference-client is not installed") from None
         self.set_envs(envs)
         if not model:
             model = self.envs["XINFERENCE_MODEL"]

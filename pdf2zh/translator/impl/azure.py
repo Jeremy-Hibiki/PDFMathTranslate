@@ -1,8 +1,5 @@
 import logging
 
-from azure.ai.translation.text import TextTranslationClient
-from azure.core.credentials import AzureKeyCredential
-
 from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
 
 
@@ -17,6 +14,12 @@ class AzureTranslator(BaseTranslator):
     lang_map = {"zh": "zh-Hans"}
 
     def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
+        try:
+            from azure.ai.translation.text import TextTranslationClient
+            from azure.core.credentials import AzureKeyCredential
+        except ImportError:
+            raise ImportError("azure-ai-translation-text is not installed") from None
+
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         endpoint = self.envs["AZURE_ENDPOINT"]

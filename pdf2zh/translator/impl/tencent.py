@@ -1,11 +1,9 @@
-from tencentcloud.common import credential
-from tencentcloud.tmt.v20180321.models import (
-    TextTranslateRequest,
-    TextTranslateResponse,
-)
-from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+from typing import TYPE_CHECKING
 
 from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
+
+if TYPE_CHECKING:
+    from tencentcloud.tmt.v20180321.models import TextTranslateResponse
 
 
 @TranslatorRegistry.register()
@@ -18,6 +16,12 @@ class TencentTranslator(BaseTranslator):
     }
 
     def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
+        try:
+            from tencentcloud.common import credential
+            from tencentcloud.tmt.v20180321.models import TextTranslateRequest
+            from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+        except ImportError:
+            raise ImportError("tencentcloud-sdk-python is not installed") from None
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         try:

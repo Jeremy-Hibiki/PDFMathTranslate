@@ -1,4 +1,3 @@
-import deepl
 import requests
 
 from pdf2zh.translator.base import BaseTranslator, TranslatorRegistry
@@ -14,6 +13,10 @@ class DeepLTranslator(BaseTranslator):
     lang_map = {"zh": "zh-Hans"}
 
     def __init__(self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs):
+        try:
+            import deepl
+        except ImportError:
+            raise ImportError("deepl is not installed") from None
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         auth_key = self.envs["DEEPL_AUTH_KEY"]

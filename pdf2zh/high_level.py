@@ -29,7 +29,7 @@ from pdfminer.pdfexceptions import PDFValueError
 from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
-from pymupdf import Document, Font, Point, Rect
+from pymupdf import Document, Point, Rect
 from pymupdf import Page as MupdfPage
 
 from pdf2zh.config import ConfigManager
@@ -326,10 +326,10 @@ def translate_stream(
 
     font_path = download_remote_fonts(lang_out.lower())
     noto_name = NOTO_NAME
-    noto = Font(noto_name, font_path)
     font_list.append((noto_name, font_path))
 
     doc_en = Document(stream=stream)
+    clean_ghost_xrefs(doc_en)
     stream = io.BytesIO()
     doc_en.save(stream)
     doc_zh = Document(stream=stream)
@@ -629,3 +629,14 @@ def download_remote_fonts(lang: str) -> str:
     logger.info(f"use font: {font_path}")
 
     return font_path
+
+
+def clean_ghost_xrefs(doc: Document) -> None:
+    """
+    https://github.com/pymupdf/PyMuPDF/issues/3635#issuecomment-2198237673
+    """
+    for xref in range(1, doc.xref_length()):
+        try:
+            doc.xref_object(xref)
+        except Exception:
+            doc.update_object(xref, "<<>>")

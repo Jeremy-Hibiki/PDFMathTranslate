@@ -252,6 +252,9 @@ class TranslateConverter(PDFConverterEx):
         # A. 原文档解析
         for child in ltpage:
             if isinstance(child, LTChar):
+                # 过滤不可见字符
+                if child.get_text().startswith("(cid:"):
+                    continue
                 cur_v = False
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
                 h, w = self.box.shape

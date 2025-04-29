@@ -270,6 +270,7 @@ class TranslateConverter(PDFConverterEx):
                     or (cls == xt_cls and len(sstk[-1].strip()) > 1 and child.size < pstk[-1].size * 0.79)  # 2. 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                     or vflag(child.fontname, child.get_text())                                              # 3. 公式字体
                     or (child.matrix[0] == 0 and child.matrix[3] == 0)                                      # 4. 垂直字体
+                    or len(set(child.font.widths.values())) == 1                                            # 5. 疑似等宽字体
                 ):
                     cur_v = True
                 # 判定括号组是否属于公式

@@ -387,7 +387,9 @@ class TranslateConverter(PDFConverterEx):
             while translator:
                 try:
                     new = await translator.atranslate(s)
-                    return re.sub(CONTROL_CHAR_PAT, "", new)
+                    new = re.sub(CONTROL_CHAR_PAT, "", new)
+                    new = re.sub(r"\{v\*\}", "", new)
+                    return new
                 except BaseException as e:
                     if log.isEnabledFor(logging.DEBUG):
                         log.exception(e)

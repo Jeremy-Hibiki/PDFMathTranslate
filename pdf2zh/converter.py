@@ -23,6 +23,10 @@ log = logging.getLogger(__name__)
 
 CONTROL_CHAR_PAT = re.compile(r"[\x00-\x1F\x7F]")
 
+DEFAULT_VFONT = (
+    r"(CM[^R]|MS.M|XY|MT|BL|RM|EU|LA|RS|LINE|LCIRCLE|TeX-|rsfs|txsy|wasy|stmary|.*Mono|.*Code|.*Ital|.*Sym|.*Math)"
+)
+
 
 class PDFConverterEx(PDFConverter):
     def __init__(
@@ -130,7 +134,8 @@ class TranslateConverter(PDFConverterEx):
         error: Literal["raise", "source", "drop"] = "source",
     ) -> None:
         super().__init__(rsrcmgr)
-        self.vfont = vfont
+        self.vfont = vfont or DEFAULT_VFONT
+        self.vfont_re = re.compile(self.vfont, re.IGNORECASE)
         self.vchar = vchar
         self.thread = thread
         self.box = box
@@ -222,15 +227,8 @@ class TranslateConverter(PDFConverterEx):
             if re.match(r"\(cid:", char):
                 return True
             # 基于字体名规则的判定
-            if self.vfont:
-                if re.match(self.vfont, font):
-                    return True
-            else:
-                if re.match(                                            # latex 字体
-                    r"(CM[^R]|MS.M|XY|MT|BL|RM|EU|LA|RS|LINE|LCIRCLE|TeX-|rsfs|txsy|wasy|stmary|.*Mono|.*Code|.*Ital|.*Sym|.*Math)",
-                    font,
-                ):
-                    return True
+            if self.vfont_re.match(font):
+                return True
             # 基于字符集规则的判定
             if self.vchar:
                 if re.match(self.vchar, char):
@@ -252,9 +250,18 @@ class TranslateConverter(PDFConverterEx):
         # A. 原文档解析
         for child in ltpage:
             if isinstance(child, LTChar):
-                # 过滤不可见字符
+                # 过滤非公式字体的不可见字符 (控制字符)
                 if child.get_text().startswith("(cid:"):
-                    continue
+                    # 排除掉公式字体
+                    font = child.fontname
+                    if isinstance(font, bytes):
+                        try:
+                            font = font.decode('utf-8')
+                        except UnicodeDecodeError:
+                            font = ""
+                    font = font.split("+")[-1]
+                    if not self.vfont_re.match(font):
+                        continue
                 cur_v = False
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
                 h, w = self.box.shape

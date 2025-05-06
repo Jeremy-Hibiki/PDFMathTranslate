@@ -260,7 +260,13 @@ class TranslateConverter(PDFConverterEx):
                         except UnicodeDecodeError:
                             font = ""
                     font = font.split("+")[-1]
-                    if not self.vfont_re.match(font):
+                    if (
+                        locals().get("cur_v", None) is not True # 跳过已经在公式部分的
+                        and (
+                            xt is None or xt_cls == -1 # 跳过开头
+                            or (not self.vfont_re.match(font) and child.cid < 0x1f) # 跳过公式字体
+                        )
+                    ):
                         continue
                 cur_v = False
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape

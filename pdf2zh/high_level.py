@@ -178,8 +178,7 @@ def doclayout_patch(
                     )
                     w_tolerance = 0.2 * tb.width
                     if (
-                        y0 <= tby0 + lh / 2
-                        and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
+                        y0 <= tby0 + lh / 2 and y1 >= tby1 - lh / 2  # block 上下边界在检测框之内 (放宽半个行高)，并且：
                     ) and (
                         tbx0 <= x0 <= tbx0 + w_tolerance  # block 左边界比检测框小 20%
                         or tbx1 - w_tolerance <= x1 <= tbx1  # block 右边界比检测框宽大 20%
@@ -545,9 +544,7 @@ def translate(
                 else:
                     r.raise_for_status()
             except Exception as e:
-                raise PDFValueError(
-                    f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}"
-                )
+                raise PDFValueError(f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}")
         filename = os.path.splitext(os.path.basename(file))[0]
 
         # If the commandline has specified converting to PDF/A format

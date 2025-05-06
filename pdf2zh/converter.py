@@ -251,7 +251,7 @@ class TranslateConverter(PDFConverterEx):
         for child in ltpage:
             if isinstance(child, LTChar):
                 # 过滤非公式字体的不可见字符 (控制字符)
-                if child.get_text().startswith("(cid:"):
+                if child.get_text().startswith("(cid:") and isinstance(child.font, PDFCIDFont):
                     # 排除掉公式字体
                     font = child.fontname
                     if isinstance(font, bytes):

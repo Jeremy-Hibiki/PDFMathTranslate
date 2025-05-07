@@ -23,7 +23,7 @@ dependencies = [
     "opencv-python-headless",
     # https://github.com/pdfminer/pdfminer.six/issues/1061
     # https://github.com/pdfminer/pdfminer.six/issues/1110
-    "pdfminer.six==20240706",
+    "pdfminer.six>=20250506",
     "peewee>=3.17.8",
     "fontTools",
     "babeldoc>=0.1.22, <0.3.0",

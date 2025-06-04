@@ -1,21 +1,23 @@
 import logging
-from typing import Any, Dict, Optional, Sequence, Tuple, cast
-import numpy as np
+from collections.abc import Sequence
+from typing import cast
 
+import numpy as np
 from pdfminer import settings
+from pdfminer.casting import safe_cmyk, safe_float, safe_rgb
 from pdfminer.pdfcolor import PREDEFINED_COLORSPACE, PDFColorSpace
 from pdfminer.pdfdevice import PDFDevice
+from pdfminer.pdffont import PDFFont
 from pdfminer.pdfinterp import (
-    PDFPageInterpreter,
-    PDFResourceManager,
-    PDFContentParser,
-    PDFInterpreterError,
-    Color,
-    PDFStackT,
     LITERAL_FORM,
     LITERAL_IMAGE,
+    Color,
+    PDFContentParser,
+    PDFInterpreterError,
+    PDFPageInterpreter,
+    PDFResourceManager,
+    PDFStackT,
 )
-from pdfminer.pdffont import PDFFont
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdftypes import (
     PDFObjRef,
@@ -34,18 +36,11 @@ from pdfminer.utils import (
     MATRIX_IDENTITY,
     Matrix,
     Rect,
-    mult_matrix,
     apply_matrix_pt,
+    mult_matrix,
 )
 
 log = logging.getLogger(__name__)
-
-
-def safe_float(o: Any) -> Optional[float]:
-    try:
-        return float(o)
-    except (TypeError, ValueError):
-        return None
 
 
 class PDFPageInterpreterEx(PDFPageInterpreter):
@@ -62,18 +57,18 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
     def dup(self) -> "PDFPageInterpreterEx":
         return self.__class__(self.rsrcmgr, self.device, self.obj_patch)
 
-    def init_resources(self, resources: Dict[object, object]) -> None:
+    def init_resources(self, resources: dict[object, object]) -> None:
         # 重载设置 fontid 和 descent
         """Prepare the fonts and XObjects listed in the Resource attribute."""
         self.resources = resources
-        self.fontmap: Dict[object, PDFFont] = {}
-        self.fontid: Dict[PDFFont, object] = {}
+        self.fontmap: dict[object, PDFFont] = {}
+        self.fontid: dict[PDFFont, object] = {}
         self.xobjmap = {}
-        self.csmap: Dict[str, PDFColorSpace] = PREDEFINED_COLORSPACE.copy()
+        self.csmap: dict[str, PDFColorSpace] = PREDEFINED_COLORSPACE.copy()
         if not resources:
             return
 
-        def get_colorspace(spec: object) -> Optional[PDFColorSpace]:
+        def get_colorspace(spec: object) -> PDFColorSpace | None:
             if isinstance(spec, list):
                 name = literal_name(spec[0])
             else:
@@ -112,7 +107,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         """Stroke path"""
 
         def is_black(color: Color) -> bool:
-            if isinstance(color, Tuple):
+            if isinstance(color, tuple):
                 return sum(color) == 0
             else:
                 return color == 0
@@ -121,7 +116,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             len(self.curpath) == 2
             and self.curpath[0][0] == "m"
             and self.curpath[1][0] == "l"
-            and apply_matrix_pt(self.ctm, self.curpath[0][-2:])[1] == apply_matrix_pt(self.ctm, self.curpath[1][-2:])[1]
+            and apply_matrix_pt(self.ctm, self.curpath[0][-2:])[1]
+            == apply_matrix_pt(self.ctm, self.curpath[1][-2:])[1]
             and is_black(self.graphicstate.scolor)
         ):  # 独立直线，水平，黑色
             # print(apply_matrix_pt(self.ctm,self.curpath[0][-2:]),apply_matrix_pt(self.ctm,self.curpath[1][-2:]),self.graphicstate.scolor)
@@ -158,27 +154,119 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
 
     ############################################################
     # 重载返回调用参数（SCN）
-    def do_SCN(self) -> None:
+    def do_SCN(self):
         """Set color for stroking operations."""
-        n = self.graphicstate.scs.ncomponents
+        n = self.scs.ncomponents
 
-        args = self.pop(n)
-        self.graphicstate.scolor = cast(Color, args)
-        return args
+        if (m := len(self.argstack)) != n:
+            if m in [1, 3, 4]:
+                components = self.pop(m)
+                if m == 1:
+                    self.scs = self.csmap["DeviceGray"]
+                elif m == 3:
+                    self.scs = self.csmap["DeviceRGB"]
+                elif m == 4:
+                    self.scs = self.csmap["DeviceCMYK"]
+            else:
+                log.warning("Cannot set stroke color because expected 1, 3 or 4 components but got %d", m)
+                return
+        else:
+            components = self.pop(n)
 
-    def do_scn(self) -> None:
+        if len(components) == 1:
+            gray = components[0]
+            gray_f = safe_float(gray)
+            if gray_f is None:
+                log.warning(f"Cannot set gray non-stroke color because {gray!r} is an invalid float value")
+            else:
+                self.graphicstate.ncolor = gray_f
+
+        elif len(components) == 3:
+            rgb = safe_rgb(*components)
+
+            if rgb is None:
+                log.warning(
+                    f"Cannot set RGB non-stroke color because components {components!r} cannot be parsed as RGB"
+                )
+            else:
+                self.graphicstate.ncolor = rgb
+
+        elif len(components) == 4:
+            cmyk = safe_cmyk(*components)
+
+            if cmyk is None:
+                log.warning(
+                    f"Cannot set CMYK non-stroke color because components {components!r} cannot be parsed as CMYK"
+                )
+            else:
+                self.graphicstate.ncolor = cmyk
+
+        else:
+            log.warning(
+                f"Cannot set non-stroke color because {len(components)} components are specified but only 1 (grayscale), 3 (rgb) and 4 (cmyk) are supported"
+            )
+            return
+        return components
+
+    def do_scn(self):
         """Set color for nonstroking operations"""
-        n = self.graphicstate.ncs.ncomponents
+        n = self.ncs.ncomponents
 
-        args = self.pop(n)
-        self.graphicstate.ncolor = cast(Color, args)
-        return args
+        if (m := len(self.argstack)) != n:
+            if m in [1, 3, 4]:
+                components = self.pop(m)
+                if m == 1:
+                    self.ncs = self.csmap["DeviceGray"]
+                elif m == 3:
+                    self.ncs = self.csmap["DeviceRGB"]
+                elif m == 4:
+                    self.ncs = self.csmap["DeviceCMYK"]
+            else:
+                log.warning("Cannot set non-stroke color because expected 1, 3 or 4 components but got %d", m)
+                return
+        else:
+            components = self.pop(n)
 
-    def do_SC(self) -> None:
+        if len(components) == 1:
+            gray = components[0]
+            gray_f = safe_float(gray)
+            if gray_f is None:
+                log.warning(f"Cannot set gray non-stroke color because {gray!r} is an invalid float value")
+            else:
+                self.graphicstate.ncolor = gray_f
+
+        elif len(components) == 3:
+            rgb = safe_rgb(*components)
+
+            if rgb is None:
+                log.warning(
+                    f"Cannot set RGB non-stroke color because components {components!r} cannot be parsed as RGB"
+                )
+            else:
+                self.graphicstate.ncolor = rgb
+
+        elif len(components) == 4:
+            cmyk = safe_cmyk(*components)
+
+            if cmyk is None:
+                log.warning(
+                    f"Cannot set CMYK non-stroke color because components {components!r} cannot be parsed as CMYK"
+                )
+            else:
+                self.graphicstate.ncolor = cmyk
+
+        else:
+            log.warning(
+                f"Cannot set non-stroke color because {len(components)} components are specified but only 1 (grayscale), 3 (rgb) and 4 (cmyk) are supported"
+            )
+            return
+        return components
+
+    def do_SC(self):
         """Set color for stroking operations"""
         return self.do_SCN()
 
-    def do_sc(self) -> None:
+    def do_sc(self):
         """Set color for nonstroking operations"""
         return self.do_scn()
 
@@ -213,8 +301,6 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 [xobj],
                 ctm=ctm,
             )
-            self.ncs = interpreter.graphicstate.ncs
-            self.scs = interpreter.graphicstate.scs
             try:  # 有的时候 form 字体加不上这里会烂掉
                 self.device.fontid = interpreter.fontid
                 self.device.fontmap = interpreter.fontmap
@@ -266,7 +352,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
 
     def render_contents(
         self,
-        resources: Dict[object, object],
+        resources: dict[object, object],
         streams: Sequence[object],
         ctm: Matrix = MATRIX_IDENTITY,
     ) -> None:
@@ -324,6 +410,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                         targs = func()
                         if targs is None:
                             targs = []
+                        if not isinstance(targs, Sequence):
+                            targs = [targs]
                         if not (name[0] == "T" or name in ["BI", "ID", "EMC"]):
                             p = " ".join(
                                 [(f"{x:f}" if isinstance(x, float) else str(x).replace("'", "")) for x in targs]
@@ -336,3 +424,25 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 self.push(obj)
         # print('REV DATA',ops)
         return ops
+
+
+# patch for self.graphicstate.scs and self.graphicstate.ncs
+if not hasattr(PDFPageInterpreterEx, "scs"):
+
+    def get_scs(self):
+        return self.graphicstate.scs
+
+    def set_scs(self, value):
+        self.graphicstate.scs = value
+
+    PDFPageInterpreterEx.scs = property(get_scs, set_scs)
+
+if not hasattr(PDFPageInterpreterEx, "ncs"):
+
+    def get_ncs(self):
+        return self.graphicstate.ncs
+
+    def set_ncs(self, value):
+        self.graphicstate.ncs = value
+
+    PDFPageInterpreterEx.ncs = property(get_ncs, set_ncs)

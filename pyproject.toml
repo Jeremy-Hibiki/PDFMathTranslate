@@ -12,7 +12,7 @@ classifiers = [
 ]
 dependencies = [
     "requests",
-    "pymupdf>=1.24",
+    "pymupdf>=1.26",
     "tqdm",
     "tenacity",
     "numpy",
@@ -84,7 +84,11 @@ max-line-length = 88
 managed = true
 package = true
 no-sources = false
-override-dependencies = ["pymupdf>=1.24"]
+override-dependencies = [
+    # install opencv-python-headless
+    "opencv-python; platform_system == 'never'",
+    "pymupdf>=1.26",
+]
 
 [tool.ruff]
 line-length = 120

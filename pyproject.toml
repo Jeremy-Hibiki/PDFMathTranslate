@@ -1,6 +1,6 @@
 [project]
 name = "pdf2zh"
-version = "1.9.6.post20"
+version = "1.9.6.post21"
 description = "Latex PDF Translator"
 authors = [{ name = "Byaidu", email = "byaidux@gmail.com" }]
 license = "AGPL-3.0"
@@ -134,7 +134,7 @@ extra-standard-library = ["typing_extensions"]
 
 
 [bumpver]
-current_version = "1.9.6.post20"
+current_version = "1.9.6.post21"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]

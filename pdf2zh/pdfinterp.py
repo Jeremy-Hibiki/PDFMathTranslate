@@ -13,6 +13,7 @@ from pdfminer.pdfinterp import (
     LITERAL_IMAGE,
     Color,
     PDFContentParser,
+    PDFGraphicState,
     PDFInterpreterError,
     PDFPageInterpreter,
     PDFResourceManager,
@@ -41,6 +42,27 @@ from pdfminer.utils import (
 )
 
 log = logging.getLogger(__name__)
+
+
+# Patch `PDFGraphicState.copy` to fix wrong scs and ncs in gstack
+# TODO remove after upstream fix: https://github.com/pdfminer/pdfminer.six/pull/1140
+def PDFGraphicState__copy(self: PDFGraphicState) -> PDFGraphicState:
+    obj = PDFGraphicState()
+    obj.linewidth = self.linewidth
+    obj.linecap = self.linecap
+    obj.linejoin = self.linejoin
+    obj.miterlimit = self.miterlimit
+    obj.dash = self.dash
+    obj.intent = self.intent
+    obj.flatness = self.flatness
+    obj.scolor = self.scolor
+    obj.scs = self.scs
+    obj.ncolor = self.ncolor
+    obj.ncs = self.ncs
+    return obj
+
+
+PDFGraphicState.copy = PDFGraphicState__copy
 
 
 class PDFPageInterpreterEx(PDFPageInterpreter):
@@ -158,21 +180,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         """Set color for stroking operations."""
         n = self.scs.ncomponents
 
-        if (m := len(self.argstack)) != n:
-            if m in [1, 3, 4]:
-                components = self.pop(m)
-                if m == 1:
-                    self.scs = self.csmap["DeviceGray"]
-                elif m == 3:
-                    self.scs = self.csmap["DeviceRGB"]
-                elif m == 4:
-                    self.scs = self.csmap["DeviceCMYK"]
-            else:
-                log.warning("Cannot set stroke color because expected 1, 3 or 4 components but got %d", m)
-                return
-        else:
-            components = self.pop(n)
-
+        components = self.pop(n)
         if len(components) == 1:
             gray = components[0]
             gray_f = safe_float(gray)
@@ -212,21 +220,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         """Set color for nonstroking operations"""
         n = self.ncs.ncomponents
 
-        if (m := len(self.argstack)) != n:
-            if m in [1, 3, 4]:
-                components = self.pop(m)
-                if m == 1:
-                    self.ncs = self.csmap["DeviceGray"]
-                elif m == 3:
-                    self.ncs = self.csmap["DeviceRGB"]
-                elif m == 4:
-                    self.ncs = self.csmap["DeviceCMYK"]
-            else:
-                log.warning("Cannot set non-stroke color because expected 1, 3 or 4 components but got %d", m)
-                return
-        else:
-            components = self.pop(n)
-
+        components = self.pop(n)
         if len(components) == 1:
             gray = components[0]
             gray_f = safe_float(gray)
